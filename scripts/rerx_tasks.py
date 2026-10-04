@@ -44,6 +44,8 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
+    from rerx.run_summary import PlateSummary
+
 RUN_DIR = Path(os.environ["RERX_RUN_DIR"])
 SCRATCH = Path(os.environ["RERX_SCRATCH"])
 SOURCE = Path(os.environ["RERX_SOURCE"])
@@ -328,23 +330,28 @@ def _finalize_profiles(
     profiles: "pd.DataFrame | Iterable[tuple[tuple[str, str], pd.DataFrame]]",
     profiler: str,
     buscar: bool,
-) -> None:
+) -> list["PlateSummary"]:
     """Annotate/normalize/select (and buscar) per plate for one profiler.
 
     ``profiles`` may be a single in-memory frame (pilot scale) or a
     sequence of per-plate frames already partitioned by the caller
     (streaming path at full scale). Only one plate's rows are in
     memory at a time either way.
+
+    Returns one :class:`rerx.run_summary.PlateSummary` per plate
+    finalized, for the operational run summary (see ``cmd_finalize``).
     """
     import pandas as pd
 
     from rerx.cytotable import plate_partitions
     from rerx.finalize import finalize_plate
+    from rerx.run_summary import PlateSummary
 
     pilot = pd.DataFrame(_load_selection())
     normalized_rows = 0
     selected_cols = None
     plates = 0
+    plate_summaries: list[PlateSummary] = []
     # Streaming: when the caller passes an iterable of pre-partitioned
     # (key, frame) pairs (iter_shard_partitions / iter_partition_frames
     # output), consume it directly; only a plain DataFrame needs
@@ -359,6 +366,7 @@ def _finalize_profiles(
             (pilot["experiment"].astype(str) == experiment)
             & (pilot["plate"].astype(str) == plate)
         ]
+        n_cells_input = len(plate_profiles)
         result = finalize_plate(
             raw_profiles=plate_profiles,
             site_metadata=plate_metadata,
@@ -374,6 +382,25 @@ def _finalize_profiles(
         normalized_rows += len(result.normalized)
         selected_cols = result.feature_selected.shape[1]
         plates += 1
+        cs = result.control_separation
+        plate_summaries.append(
+            PlateSummary(
+                experiment=experiment,
+                plate=plate,
+                profiler=profiler,
+                n_cells_input=n_cells_input,
+                n_cells_flagged_outlier=result.n_cells_flagged_outlier,
+                n_cells_normalized=len(result.normalized),
+                n_feature_selected_cols=result.feature_selected.shape[1],
+                control_separation_passed=cs.passed if cs else None,
+                control_separation_skipped=cs.skipped if cs else None,
+                control_separation_median_effect_size=(
+                    cs.median_abs_effect_size if cs else None
+                ),
+                buscar_status="skipped" if result.buscar_skipped_reason else "scored",
+                buscar_skipped_reason=result.buscar_skipped_reason,
+            )
+        )
         if result.buscar_skipped_reason:
             _log(
                 f"{profiler} {experiment}/{plate}: buscar skipped -- "
@@ -381,10 +408,17 @@ def _finalize_profiles(
             )
         else:
             _log(f"{profiler} {experiment}/{plate}: buscar scored")
+        if result.n_cells_flagged_outlier:
+            _log(
+                f"{profiler} {experiment}/{plate}: coSMicQC flagged "
+                f"{result.n_cells_flagged_outlier} outlier cell(s) "
+                "(dropped before normalization)"
+            )
     _log(
         f"{profiler}: annotated/normalized {normalized_rows} cells "
         f"across {plates} plate(s); feature_selected -> {selected_cols} cols"
     )
+    return plate_summaries
 
 
 def _fuse_finalized_profiles() -> None:
@@ -426,17 +460,36 @@ def _fuse_finalized_profiles() -> None:
         return
     fused_rows = 0
     fused_cols = 0
+    cp_rows_total = 0
+    morphem_rows_total = 0
+    dropped_rows_total = 0
     partitions_written: list[Path] = []
     for cp_path, me_path in pairs:
-        fused = fuse_features(pd.read_parquet(cp_path), pd.read_parquet(me_path))
-        written = write_fused_profiles(fused, RUN_DIR)
+        cp_df = pd.read_parquet(cp_path)
+        me_df = pd.read_parquet(me_path)
+        fused = fuse_features(cp_df, me_df)
+        written = write_fused_profiles(
+            fused, RUN_DIR, cp_rows=len(cp_df), morphem_rows=len(me_df)
+        )
+        dropped = max(len(cp_df), len(me_df)) - len(fused)
+        if dropped:
+            _log(
+                f"fused {cp_path.parent.parent.name}/{cp_path.parent.name}: "
+                f"dropped {dropped} non-overlapping cell(s) "
+                f"(CP {len(cp_df)}, MorphEm {len(me_df)} -> {len(fused)} fused)"
+            )
         partitions_written.extend(written)
         fused_rows += len(fused)
         fused_cols = fused.shape[1]
-        del fused
+        cp_rows_total += len(cp_df)
+        morphem_rows_total += len(me_df)
+        dropped_rows_total += dropped
+        del fused, cp_df, me_df
     _log(
         f"fused: {fused_rows} cells x {fused_cols} cols from "
-        f"{len(pairs)} plate(s) -> {len(partitions_written)} partition(s)"
+        f"{len(pairs)} plate(s) -> {len(partitions_written)} partition(s) "
+        f"({dropped_rows_total} non-overlapping cell(s) dropped across "
+        f"{cp_rows_total} CP / {morphem_rows_total} MorphEm input cells)"
     )
 
 
@@ -602,11 +655,12 @@ def _validate_run_streaming(
     shard_parquets: list[Path],
     sqlite_paths: list[Path],
     crop_dir: Path,
-) -> int:
+) -> dict:
     """Run the run's validation checks one shard at a time.
 
-    Returns the number of cells whose crops decoded and joined
-    cleanly. Raises SystemExit on the first failure.
+    Returns a plain-dict validation summary (sqlite/schema/crop-decode
+    counts), suitable for the operational run summary. Raises
+    SystemExit on the first failure.
     """
     import pandas as pd
 
@@ -658,7 +712,14 @@ def _validate_run_streaming(
         f"{len(pairs)} crop shard(s) join + decode checks passed "
         f"({decoded_total} cells)"
     )
-    return decoded_total
+    return {
+        "passed": True,
+        "sqlite_shards_checked": len(sqlite_paths),
+        "sqlite_shards_failed": 0,
+        "schema_consistent": True,
+        "crop_shard_pairs_checked": len(pairs),
+        "crop_decode_checked": decoded_total,
+    }
 
 
 def cmd_finalize() -> None:
@@ -680,17 +741,21 @@ def cmd_finalize() -> None:
     import pandas as pd
 
     from rerx.catalog import build_run_catalog
+    from rerx.qc_notebook import build_crop_review_notebook
+    from rerx.run_summary import RunSummary, write_run_summary
     from rerx.streaming import iter_partition_frames, iter_shard_partitions
 
     shard_parquets = sorted((SCRATCH / RUN_ID / "cytotable").glob("*.parquet"))
     if not shard_parquets:
         raise SystemExit(f"no shard parquets under {SCRATCH / RUN_ID / 'cytotable'}")
 
+    plate_summaries: list[PlateSummary] = []
+
     # 1. Finalize CellProfiler profiles per plate, streamed from the
     #    shard parquets (each plate is its own biological batch).
     #    The durable partitioned raw layout is a required catalog and
     #    buscar input, so write it as the same per-plate pass.
-    _finalize_profiles(
+    plate_summaries += _finalize_profiles(
         iter_shard_partitions(shard_parquets), profiler="cellprofiler", buscar=True
     )
 
@@ -738,7 +803,7 @@ def cmd_finalize() -> None:
             )
             _append_partitioned_profiles(frame, morphem_partitions)
         _log(f"morphem: partitioned {len(morphem_parquets)} raw shard(s)")
-        _finalize_profiles(
+        plate_summaries += _finalize_profiles(
             iter_partition_frames(morphem_partitions),
             profiler="morphem",
             buscar=True,
@@ -759,11 +824,31 @@ def cmd_finalize() -> None:
 
     # 3. Validation, one shard at a time (see _validate_run_streaming).
     sqlite_paths = sorted(SCRATCH.glob(f"{RUN_ID}/*/output/*.sqlite"))
-    _validate_run_streaming(
+    validation_summary = _validate_run_streaming(
         shard_parquets,
         sqlite_paths,
         crop_dir=RUN_DIR / "crops" / "cells",
     )
+
+    # 3b. Operational run summary (plan.md: pipeline health, not
+    # biology -- shard/plate counts, coSMicQC flag rates, buscar skip
+    # reasons, validation results). Separate from the reports/ HTML
+    # reports, which answer "what did we discover" instead.
+    run_summary = RunSummary(
+        run_id=RUN_ID, plates=plate_summaries, validation=validation_summary
+    )
+    summary_path = write_run_summary(run_summary, RUN_DIR / "run_summary.json")
+    _log(f"run summary -> {summary_path} ({run_summary.totals()})")
+
+    # 3c. Human crop spot-check notebook (plan.md section 16/27: "random
+    # crop and segmentation QC looks correct"). A convenience output, not
+    # a validation gate -- skipped quietly if crops never ran for this
+    # run (e.g. a finalize-only rerun).
+    try:
+        notebook_path = build_crop_review_notebook(run_dir=RUN_DIR)
+        _log(f"crop spot-check notebook -> {notebook_path}")
+    except FileNotFoundError as exc:
+        _log(f"crop spot-check notebook skipped: {exc}")
 
     # 4. Catalog + success marker.
     build_run_catalog(

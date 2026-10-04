@@ -2,6 +2,7 @@
 Tests for the pycytominer module.
 """
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -18,6 +19,8 @@ from rerx.pycytominer import (
     add_perturbation_column,
     annotate_profiles,
     buscar_state,
+    drop_flagged_outliers,
+    flag_outliers,
     normalization_samples_query,
     pycytominer_control_type,
     rename_image_metadata_columns,
@@ -324,3 +327,80 @@ def test_add_perturbation_column_missing_conc_sentinels() -> None:
         "Remdesivir (GS-5734)",
         "Remdesivir (GS-5734)",
     ]
+
+
+def _nuclei_profiles(n_normal: int = 50, n_large: int = 3) -> pd.DataFrame:
+    rng = np.random.default_rng(0)
+    normal_area = rng.normal(100.0, 2.0, size=n_normal)
+    normal_form = rng.normal(0.8, 0.01, size=n_normal)
+    # large_nuclei requires BOTH large area AND low formfactor
+    # (cosmicqc ANDs every feature condition within a threshold set).
+    large_area = rng.normal(2000.0, 2.0, size=n_large)
+    large_form = rng.normal(0.2, 0.01, size=n_large)
+    return pd.DataFrame(
+        {
+            "Metadata_cell_id": [f"c{i}" for i in range(n_normal + n_large)],
+            "Nuclei_AreaShape_Area": np.concatenate([normal_area, large_area]),
+            "Nuclei_AreaShape_FormFactor": np.concatenate([normal_form, large_form]),
+            "Nuclei_AreaShape_Eccentricity": rng.normal(
+                0.5, 0.05, size=n_normal + n_large
+            ),
+            "Cells_AreaShape_Area": rng.normal(200.0, 10.0, size=n_normal + n_large),
+        }
+    )
+
+
+def test_flag_outliers_adds_metadata_columns_without_dropping_rows() -> None:
+    profiles = _nuclei_profiles()
+    flagged = flag_outliers(profiles)
+    assert len(flagged) == len(profiles)
+    outlier_cols = [c for c in flagged.columns if c.startswith("Metadata_cqc_")]
+    assert outlier_cols
+    assert all(c.endswith("_is_outlier") for c in outlier_cols)
+    # Must be a plain DataFrame (not cosmicqc's CytoDataFrame/CytoTable
+    # wrapper type) so downstream pandas ops behave normally.
+    assert type(flagged) is pd.DataFrame
+
+
+def test_flag_outliers_flags_large_nuclei() -> None:
+    profiles = _nuclei_profiles()
+    flagged = flag_outliers(profiles)
+    # The last n_large rows were constructed well outside the normal
+    # nuclei area range, so at least one outlier column must catch them.
+    any_outlier = flagged[
+        [c for c in flagged.columns if c.endswith("_is_outlier")]
+    ].any(axis=1)
+    assert any_outlier.tail(3).all()
+    assert not any_outlier.head(50).any()
+
+
+def test_flag_outliers_missing_nuclei_columns_is_a_noop() -> None:
+    # MorphEm profiles have no Nuclei_AreaShape_* columns at all; the
+    # default nuclei QC thresholds don't apply, so this must pass
+    # through unchanged rather than raising.
+    profiles = pd.DataFrame(
+        {
+            "Metadata_cell_id": ["a", "b"],
+            "Morphem_feature_0": [0.1, 0.2],
+        }
+    )
+    flagged = flag_outliers(profiles)
+    pd.testing.assert_frame_equal(flagged, profiles)
+
+
+def test_drop_flagged_outliers_removes_only_flagged_rows() -> None:
+    profiles = _nuclei_profiles()
+    flagged = flag_outliers(profiles)
+    before = len(flagged)
+    filtered = drop_flagged_outliers(flagged)
+    assert len(filtered) < before
+    # The cqc flag columns themselves are dropped from the output -- they
+    # are QC bookkeeping, not morphology features, and must not leak into
+    # normalize/select_features.
+    assert not any(c.startswith("Metadata_cqc_") for c in filtered.columns)
+
+
+def test_drop_flagged_outliers_noop_when_no_flag_columns() -> None:
+    profiles = pd.DataFrame({"Metadata_cell_id": ["a", "b"], "x": [1, 2]})
+    filtered = drop_flagged_outliers(profiles)
+    pd.testing.assert_frame_equal(filtered, profiles)

@@ -32,6 +32,37 @@ def test_fusion_metadata_labels_kind() -> None:
     assert meta["sources"]["morphem"].endswith("feature_selected")
 
 
+def test_fusion_metadata_records_non_overlapping_drop_counts() -> None:
+    """Non-overlapping cells dropped by the inner join must be counted,
+    not just warned about -- the count is what makes it checkable after
+    the fact from the fusion.json sidecar."""
+    from rerx.fuse import fusion_metadata
+
+    cp = _cp_frame(["w_c0", "w_c1", "w_c2", "w_c3"])  # 4 CP cells
+    me = _morphem_frame(["w_c0", "w_c1"])  # 2 MorphEm cells, 50% overlap
+    fused = fuse_features(cp, me)
+    meta = fusion_metadata(fused, cp_rows=len(cp), morphem_rows=len(me))
+    assert meta["rows"] == 2
+    assert meta["cellprofiler_input_rows"] == 4
+    assert meta["morphem_input_rows"] == 2
+    assert meta["cellprofiler_rows_dropped"] == 2
+    assert meta["morphem_rows_dropped"] == 0
+
+
+def test_fusion_metadata_drop_counts_default_to_none() -> None:
+    """Without the optional pre-fusion counts, drop fields are None
+    rather than silently wrong (callers that don't pass counts should
+    not get a misleading 0)."""
+    from rerx.fuse import fusion_metadata
+
+    cp = _cp_frame(["w_c0", "w_c1"])
+    me = _morphem_frame(["w_c0", "w_c1"])
+    fused = fuse_features(cp, me)
+    meta = fusion_metadata(fused)
+    assert meta["cellprofiler_input_rows"] is None
+    assert meta["cellprofiler_rows_dropped"] is None
+
+
 def test_write_fused_profiles_partitions_and_labels(tmp_path) -> None:
     """Fused table lands under profiles/fused with the label sidecar."""
     import json

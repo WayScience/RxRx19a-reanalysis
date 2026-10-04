@@ -41,8 +41,11 @@ OBJECT_NUMBER_COLUMNS = (
 
 # Join SQL: CytoTable's built-in cellprofiler_sqlite preset, extended to
 # also keep Image_Metadata_Experiment and Image_Metadata_Site (the preset
-# only keeps Well/Plate). Compartments and parent-child logic are otherwise
-# identical to the upstream preset (cytotable.presets.config
+# only keeps Well/Plate), plus the MeasureImageQuality columns
+# (Image_ImageQuality_*; see rerx.validate.check_image_quality -- the
+# production-safe per-image dim-well check for the Plate 25 AA08/E08
+# over-segmentation problem). Compartments and parent-child logic are
+# otherwise identical to the upstream preset (cytotable.presets.config
 # ["cellprofiler_sqlite"]["CONFIG_JOINS"]).
 RERX_JOINS = """
     SELECT
@@ -52,6 +55,7 @@ RERX_JOINS = """
         per_image.Image_Metadata_Well,
         per_image.Image_Metadata_Site,
         COLUMNS('Image_FileName_.*'),
+        COLUMNS('Image_ImageQuality_.*'),
         per_cytoplasm.* EXCLUDE (Metadata_ImageNumber),
         per_cells.* EXCLUDE (Metadata_ImageNumber),
         per_nuclei.* EXCLUDE (Metadata_ImageNumber)

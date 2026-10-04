@@ -187,3 +187,69 @@ def test_finalize_plate_buscar_keeps_profiler_label(tmp_path: Path) -> None:
     )
     assert summary_path.is_file()
     assert json.loads(summary_path.read_text())["profiler"] == "morphem"
+
+
+def test_finalize_plate_flags_and_drops_cosmicqc_outliers(tmp_path: Path) -> None:
+    # A plate whose raw profiles include Nuclei_AreaShape_* columns (the
+    # real CellProfiler case) must have coSMicQC's default outlier
+    # checks run and the flagged cells dropped before normalization.
+    rng = np.random.default_rng(2)
+    rows = []
+    for well, disease in [("A01", "Mock"), ("A02", "Active SARS-CoV-2")]:
+        for cell_idx in range(30):
+            # One deliberately huge+low-formfactor nucleus per well to
+            # trip the "large_nuclei" default threshold set.
+            is_outlier = cell_idx == 0
+            rows.append(
+                {
+                    "Metadata_cell_id": f"{well}_c{cell_idx}",
+                    "Image_Metadata_Experiment": "HRCE-1",
+                    "Image_Metadata_Plate": "25",
+                    "Image_Metadata_Well": well,
+                    "Image_Metadata_Site": 1,
+                    "Cells_AreaShape_Area": rng.normal(0.0, 1.0),
+                    "Nuclei_AreaShape_Area": (
+                        2000.0 if is_outlier else rng.normal(100.0, 2.0)
+                    ),
+                    "Nuclei_AreaShape_FormFactor": (
+                        0.2 if is_outlier else rng.normal(0.8, 0.01)
+                    ),
+                    "Nuclei_AreaShape_Eccentricity": rng.normal(0.5, 0.05),
+                }
+            )
+    raw = pd.DataFrame(rows)
+    site_metadata = pd.DataFrame(
+        [
+            {
+                "experiment": "HRCE-1",
+                "plate": "25",
+                "well": "A01",
+                "site": 1,
+                "disease_condition": "Mock",
+                "treatment": None,
+                "treatment_conc": None,
+            },
+            {
+                "experiment": "HRCE-1",
+                "plate": "25",
+                "well": "A02",
+                "site": 1,
+                "disease_condition": "Active SARS-CoV-2",
+                "treatment": None,
+                "treatment_conc": None,
+            },
+        ]
+    )
+
+    result = finalize_plate(
+        raw_profiles=raw,
+        site_metadata=site_metadata,
+        run_dir=tmp_path / "run",
+        experiment="HRCE-1",
+        plate="25",
+        run_buscar=False,
+    )
+
+    assert result.n_cells_flagged_outlier >= 2
+    assert len(result.normalized) == len(raw) - result.n_cells_flagged_outlier
+    assert not any(c.startswith("Metadata_cqc_") for c in result.normalized.columns)

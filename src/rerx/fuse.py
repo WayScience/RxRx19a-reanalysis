@@ -145,6 +145,8 @@ def fusion_metadata(
     *,
     cp_source: str = "profiles/cellprofiler/feature_selected",
     morphem_source: str = "profiles/morphem/feature_selected",
+    cp_rows: int | None = None,
+    morphem_rows: int | None = None,
 ) -> dict[str, Any]:
     """
     Build the "what kind of fused" label sidecar for a fused table.
@@ -157,12 +159,21 @@ def fusion_metadata(
         Label for the CellProfiler input space.
     morphem_source : str
         Label for the MorphEm input space.
+    cp_rows : int | None
+        Row count of the CP frame *before* the inner join, if known.
+        Used to report how many CP-only cells the join dropped.
+    morphem_rows : int | None
+        Row count of the MorphEm frame before the inner join, if known.
 
     Returns
     -------
     dict[str, object]
         JSON-serializable metadata describing the fusion: kind, join
-        key, sources, row count, and per-source feature counts.
+        key, sources, row count, per-source feature counts, and (when
+        ``cp_rows``/``morphem_rows`` are given) non-overlapping rows
+        dropped by the inner join on each side -- the durable record
+        that fusion drops non-overlapping cells, beyond the transient
+        ``fuse_features`` warning.
     """
     cp_features = [c for c in fused.columns if c.startswith(_CP_FEATURE_PREFIXES)]
     morphem_features = [c for c in fused.columns if c.startswith(_MORPHEM_PREFIX)]
@@ -177,12 +188,23 @@ def fusion_metadata(
         "rows": len(fused),
         "cellprofiler_feature_cols": len(cp_features),
         "morphem_feature_cols": len(morphem_features),
+        "cellprofiler_input_rows": cp_rows,
+        "morphem_input_rows": morphem_rows,
+        "cellprofiler_rows_dropped": (
+            cp_rows - len(fused) if cp_rows is not None else None
+        ),
+        "morphem_rows_dropped": (
+            morphem_rows - len(fused) if morphem_rows is not None else None
+        ),
     }
 
 
 def write_fused_profiles(
     fused: pd.DataFrame,
     run_root: Path,
+    *,
+    cp_rows: int | None = None,
+    morphem_rows: int | None = None,
 ) -> list[Path]:
     """
     Write the fused table, partitioned by experiment and plate, plus the
@@ -195,6 +217,11 @@ def write_fused_profiles(
     run_root : Path
         Run root directory (the parquet files land under
         ``<run_root>/profiles/fused/feature_selected/``).
+    cp_rows : int | None
+        Row count of the CP frame before the inner join, if known
+        (recorded in the sidecar's drop-count fields).
+    morphem_rows : int | None
+        Row count of the MorphEm frame before the inner join, if known.
 
     Returns
     -------
@@ -237,6 +264,11 @@ def write_fused_profiles(
 
     sidecar = run_root / "profiles" / "fused" / "fusion.json"
     sidecar.write_text(
-        json.dumps(fusion_metadata(fused), indent=2, sort_keys=True) + "\n"
+        json.dumps(
+            fusion_metadata(fused, cp_rows=cp_rows, morphem_rows=morphem_rows),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
     )
     return written

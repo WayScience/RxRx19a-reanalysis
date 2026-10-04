@@ -20,6 +20,7 @@ dynamic = [ "version" ]
 dependencies = [
   "buscar",
   "cosmicqc>=1.1.2",
+  "cytodataframe>=0.3.5",
   "cytotable>=1.2.6",
   "duckdb>=1.5.5",
   "fire>=0.7",

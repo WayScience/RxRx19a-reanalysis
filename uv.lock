@@ -5414,6 +5414,7 @@ source = { editable = "." }
 dependencies = [
     { name = "buscar" },
     { name = "cosmicqc" },
+    { name = "cytodataframe" },
     { name = "cytotable" },
     { name = "duckdb" },
     { name = "fire" },
@@ -5452,6 +5453,7 @@ notebooks = [
 requires-dist = [
     { name = "buscar", git = "https://github.com/WayScience/buscar.git" },
     { name = "cosmicqc", specifier = ">=1.1.2" },
+    { name = "cytodataframe", specifier = ">=0.3.5" },
     { name = "cytotable", specifier = ">=1.2.6" },
     { name = "duckdb", specifier = ">=1.5.5" },
     { name = "fire", specifier = ">=0.7" },

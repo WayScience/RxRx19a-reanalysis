@@ -75,6 +75,16 @@ PYCYTOMINER_CONTROL_SAMPLE = "sample"
 
 BUSCAR_STATE_OTHER = "other"
 
+# coSMicQC's default nuclei QC threshold sets (see
+# cosmicqc/data/qc_nuclei_thresholds_default.yml) only read these three
+# Nuclei_AreaShape_* features. MorphEm profiles have none of them, so
+# this is the exact check for "do the default thresholds even apply".
+_COSMICQC_DEFAULT_NUCLEI_FEATURES = (
+    "Nuclei_AreaShape_Area",
+    "Nuclei_AreaShape_FormFactor",
+    "Nuclei_AreaShape_Eccentricity",
+)
+
 
 def rename_image_metadata_columns(profiles: pd.DataFrame) -> pd.DataFrame:
     """
@@ -308,6 +318,72 @@ def add_perturbation_column(annotated: pd.DataFrame) -> pd.DataFrame:
     out = annotated.copy()
     out["Metadata_perturbation"] = out.apply(perturbation, axis=1)
     return out
+
+
+def flag_outliers(profiles: pd.DataFrame) -> pd.DataFrame:
+    """
+    Flag coSMicQC outlier nuclei (plan.md section 18, step 2).
+
+    Runs coSMicQC's default nuclei QC threshold sets (small/low-formfactor,
+    elongated, large -- see ``cosmicqc.label_outliers``) and adds one
+    ``Metadata_cqc_<set>_is_outlier`` boolean column per set. Rows are not
+    removed here; see :func:`drop_flagged_outliers` for that (plan.md
+    keeps QC columns outside the morphology feature set, so flag and
+    drop are separate steps -- a caller may want to inspect flagged rows
+    before discarding them).
+
+    A no-op when ``profiles`` lacks the ``Nuclei_AreaShape_*`` columns
+    the default thresholds read (e.g. MorphEm profiles, which have no
+    CellProfiler nuclei shape features at all).
+
+    Parameters
+    ----------
+    profiles : pd.DataFrame
+        Annotated profiles (CellProfiler or MorphEm).
+
+    Returns
+    -------
+    pd.DataFrame
+        ``profiles`` with ``Metadata_cqc_*_is_outlier`` columns added, or
+        unchanged if the nuclei QC thresholds don't apply.
+    """
+    if not all(c in profiles.columns for c in _COSMICQC_DEFAULT_NUCLEI_FEATURES):
+        return profiles
+
+    import cosmicqc
+
+    labeled = cosmicqc.label_outliers(profiles)
+    # cosmicqc returns a CytoDataFrame (a pandas subclass carrying extra
+    # image/context attributes); normalize to a plain DataFrame so
+    # downstream pycytominer calls (which only expect plain pandas) see
+    # the type they're written against.
+    return pd.DataFrame(labeled)
+
+
+def drop_flagged_outliers(flagged: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drop rows flagged by any :func:`flag_outliers` outlier column.
+
+    Removes the ``Metadata_cqc_*_is_outlier`` columns from the result too
+    -- they are QC bookkeeping, not morphology features, and normalize/
+    select_features should never see them as feature columns.
+
+    Parameters
+    ----------
+    flagged : pd.DataFrame
+        Output of :func:`flag_outliers`.
+
+    Returns
+    -------
+    pd.DataFrame
+        ``flagged`` with outlier rows and QC flag columns removed. A
+        no-op (returned unchanged) if no flag columns are present.
+    """
+    outlier_cols = [c for c in flagged.columns if c.endswith("_is_outlier")]
+    if not outlier_cols:
+        return flagged
+    keep = ~flagged[outlier_cols].any(axis=1)
+    return flagged.loc[keep].drop(columns=outlier_cols).reset_index(drop=True)
 
 
 def annotate_profiles(

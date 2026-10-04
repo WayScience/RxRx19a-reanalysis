@@ -12,10 +12,12 @@ from rerx.crops import encode_jpeg
 from rerx.cytotable import add_cell_ids
 from rerx.validate import (
     CropDecodeResult,
+    ImageQualityResult,
     PilotValidationReport,
     SqliteIntegrityResult,
     check_control_separation,
     check_crops_decode,
+    check_image_quality,
     check_sqlite_integrity,
     validate_pilot_run,
 )
@@ -269,3 +271,52 @@ def test_check_control_separation_missing_one_side_is_skipped() -> None:
     mock_only = profiles[profiles["Metadata_rxrx_control_type"] == "mock"]
     result = check_control_separation(mock_only)
     assert result.skipped
+
+
+def _quality_profiles(dim_well: str | None) -> pd.DataFrame:
+    rows = []
+    normal_wells = {"AA02": [0.46, 0.57], "AA09": [0.44, 0.40], "AA16": [0.48, 0.50]}
+    for well, values in normal_wells.items():
+        for site, value in enumerate(values, start=1):
+            rows.append(
+                {
+                    "Image_Metadata_Well": well,
+                    "Image_Metadata_Site": site,
+                    "Image_ImageQuality_MaxIntensity_DNA": value,
+                }
+            )
+    if dim_well is not None:
+        for site in (1, 2):
+            rows.append(
+                {
+                    "Image_Metadata_Well": dim_well,
+                    "Image_Metadata_Site": site,
+                    "Image_ImageQuality_MaxIntensity_DNA": 0.20,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_check_image_quality_flags_a_dim_well() -> None:
+    profiles = _quality_profiles(dim_well="AA08")
+    result = check_image_quality(profiles)
+
+    assert isinstance(result, ImageQualityResult)
+    assert result.flagged_wells == ["AA08"]
+    assert not result.passed
+
+
+def test_check_image_quality_passes_when_no_well_is_dim() -> None:
+    profiles = _quality_profiles(dim_well=None)
+    result = check_image_quality(profiles)
+
+    assert result.flagged_wells == []
+    assert result.passed
+
+
+def test_check_image_quality_skipped_when_column_missing() -> None:
+    profiles = pd.DataFrame({"Image_Metadata_Well": ["AA02"]})
+    result = check_image_quality(profiles)
+
+    assert result.skipped
+    assert result.passed

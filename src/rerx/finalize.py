@@ -23,6 +23,8 @@ import pandas as pd
 
 from rerx.buscar import BuscarConfig, PlateBuscarResult, run_buscar_for_plate
 from rerx.pycytominer import add_perturbation_column, annotate_profiles
+from rerx.pycytominer import drop_flagged_outliers as _drop_flagged_outliers
+from rerx.pycytominer import flag_outliers as _flag_outliers
 from rerx.pycytominer import normalize_profiles as _normalize_profiles
 from rerx.pycytominer import select_features as _select_features
 from rerx.validate import ControlSeparationResult, check_control_separation
@@ -58,6 +60,10 @@ class PlateFinalizeResult:
         Why buscar was skipped (e.g. failed control separation, or a
         real buscar error caught after the gate still let a bad case
         through), or ``None`` if it ran.
+    n_cells_flagged_outlier : int
+        Cells coSMicQC flagged (any threshold set) and dropped before
+        normalization (plan.md section 18, step 2). 0 when the default
+        nuclei QC thresholds don't apply (e.g. MorphEm profiles).
     """
 
     experiment: str
@@ -70,6 +76,7 @@ class PlateFinalizeResult:
     control_separation: ControlSeparationResult | None
     buscar: PlateBuscarResult | None
     buscar_skipped_reason: str | None
+    n_cells_flagged_outlier: int = 0
 
 
 def finalize_plate(  # noqa: PLR0913
@@ -124,10 +131,19 @@ def finalize_plate(  # noqa: PLR0913
     annotated = annotate_profiles(raw_profiles, site_metadata)
     annotated = add_perturbation_column(annotated)
 
+    # coSMicQC outlier flag + filter, before normalization (plan.md
+    # section 18, steps 2-4): flag_outliers is a no-op when the default
+    # nuclei QC thresholds don't apply (e.g. MorphEm profiles have no
+    # Nuclei_AreaShape_* columns), so n_cells_flagged_outlier stays 0.
+    n_before_qc = len(annotated)
+    flagged = _flag_outliers(annotated)
+    filtered = _drop_flagged_outliers(flagged)
+    n_cells_flagged_outlier = n_before_qc - len(filtered)
+
     normalized_path = (
         run_dir / "profiles" / profiler / "normalized" / part_dir / "profiles.parquet"
     )
-    normalized = _normalize_profiles(annotated, normalized_path)
+    normalized = _normalize_profiles(filtered, normalized_path)
 
     feature_selected_path = (
         run_dir
@@ -185,4 +201,5 @@ def finalize_plate(  # noqa: PLR0913
         control_separation=control_separation,
         buscar=buscar_result,
         buscar_skipped_reason=buscar_skipped_reason,
+        n_cells_flagged_outlier=n_cells_flagged_outlier,
     )

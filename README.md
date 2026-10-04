@@ -38,6 +38,43 @@ The pipeline has eight stages, in order:
 1. **Catalog** — build a read-only DuckLake catalog over the finished
    Parquet files, so anyone can query the run with plain SQL.
 
+Finalize also writes a human crop spot-check notebook
+(`qc/images/crop_spot_check.py`, built by `rerx.qc_notebook` — a small,
+seeded-random sample of per-cell crops rendered with
+[`cytodataframe`](https://github.com/cytomining/CytoDataFrame) so a person
+can open it in Jupyter and visually confirm segmentation looks centered
+and masked correctly). It is a convenience output of every run, not a
+pipeline stage with its own data to pass downstream.
+
+The diagram below shows the same eight stages as data flowing left to
+right, with the QC checks placed where they actually run, and the
+pilot analysis reports that read the finished catalog at the end:
+
+```mermaid
+flowchart TD
+    A["1 Metadata and selection<br/>download RxRx19a metadata,<br/>pick pilot or full wells"] --> B
+    B["2 CellProfiler<br/>segment cells, measure features<br/>(container: Docker/Apptainer)"] --> BQC{{"QC: SQLite integrity check<br/>check_sqlite_integrity"}}
+    BQC --> C["3 CytoTable<br/>join Nuclei/Cells/Cytoplasm<br/>into one row per cell"]
+    C --> D["4 Crops<br/>per-cell 5-channel JPEG crops"]
+    D --> DQC{{"QC: crop decode check<br/>check_crops_decode"}}
+    DQC --> E["5 MorphEm<br/>deep-learning embedding<br/>per cell crop (CPU container)"]
+    C --> F
+    E --> F["6 Finalize (per plate, per profiler)<br/>annotate + add perturbation"]
+    F --> FQC1{{"QC: coSMicQC outlier flag + drop<br/>flag_outliers (before normalizing)"}}
+    FQC1 --> F2["normalize + select features"]
+    F2 --> FQC2{{"QC: control separation gate<br/>check_control_separation<br/>(mock vs. disease, Cohen's d)"}}
+    FQC2 -- pass --> FB["buscar reversal scoring<br/>on-score / off-score per treatment"]
+    FQC2 -- fail --> FSkip["buscar skipped,<br/>reason logged"]
+    D -. sampled .-> QCN{{"QC: human crop spot-check<br/>qc/images/crop_spot_check.py<br/>(cytodataframe, manual review)"}}
+    FB --> G
+    FSkip --> G["7 Fuse<br/>join CellProfiler + MorphEm<br/>per cell on Metadata_cell_id"]
+    G --> H["8 Catalog<br/>DuckLake over the finished Parquet"]
+    H --> R["Analysis and reports<br/>(reports/, pilot scale)"]
+    R --> R1["phenotypic_overview.html<br/>CellProfiler vs. MorphEm vs.<br/>Recursion embeddings"]
+    R --> R2["buscar_reversal.html<br/>on/off reversal scores<br/>per treatment"]
+    R --> R3["pipeline_run.html<br/>run health: timing,<br/>QC pass/fail, flag rates"]
+```
+
 Two runners drive this pipeline:
 
 - Local, small runs: `tests/test_pilot_e2e.py` (an opt-in end-to-end

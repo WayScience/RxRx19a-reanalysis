@@ -37,6 +37,7 @@ from rerx.cytotable import (
     check_schema_consistency,
     validate_unique_cell_ids,
 )
+from rerx.segmentation_check import flag_dim_wells
 
 # Parent-child relationships CellProfiler writes into a shard's SQLite,
 # matching the ExportToDatabase object-relationship export (plan.md
@@ -369,6 +370,84 @@ def check_control_separation(
 
 
 @dataclass(frozen=True)
+class ImageQualityResult:
+    """
+    Outcome of checking CellProfiler's own ``MeasureImageQuality`` output
+    for plate-wide dim-well outliers.
+
+    This is the production-safe replacement for the one-off Cellpose
+    cross-check that found Plate 25's AA08/E08 wells by hand (plan.md
+    segmentation review): ``MeasureImageQuality`` runs on every
+    production image at negligible cost, so this reads the same signal
+    (per-image DNA channel max intensity) straight off a column
+    CellProfiler already wrote, instead of requiring a side Cellpose run
+    to notice a future dim-well problem.
+
+    Attributes
+    ----------
+    flagged_wells : list[str]
+        Wells whose mean DNA-channel max intensity is a plate-wide
+        outlier on the dim side (see :func:`rerx.segmentation_check.flag_dim_wells`).
+    skipped : bool
+        ``True`` when the quality column is absent -- not a failure,
+        just not checkable (e.g. a pipeline run from before this module
+        was added, or `check_image_quality` is being invoked against
+        a frame that was never quality-measured in the first place).
+    """
+
+    flagged_wells: list[str]
+    skipped: bool
+
+    @property
+    def passed(self) -> bool:
+        """Whether no well was flagged, or the check was skipped."""
+        if self.skipped:
+            return True
+        return len(self.flagged_wells) == 0
+
+
+def check_image_quality(
+    profiles: pd.DataFrame,
+    metric_col: str = "Image_ImageQuality_MaxIntensity_DNA",
+    well_col: str = "Image_Metadata_Well",
+    n_mad: float = 3.0,
+) -> ImageQualityResult:
+    """
+    Flag wells with a plate-wide outlier-dim DNA channel, from
+    CellProfiler's own per-image quality metrics.
+
+    Parameters
+    ----------
+    profiles : pd.DataFrame
+        Per-image (or per-cell, duplicated per image) rows carrying
+        ``well_col`` and ``metric_col`` -- the ``MeasureImageQuality``
+        module's ``ExportToDatabase`` output, one column per metric per
+        measured channel.
+    metric_col : str
+        Quality column to flag on. Defaults to the DNA channel's max
+        intensity (the channel used for nuclei segmentation, and the one
+        that showed the Plate 25 AA08/E08 problem).
+    well_col : str
+        Column identifying each row's well.
+    n_mad : float
+        Flag threshold in median absolute deviations below the plate
+        median (see :func:`rerx.segmentation_check.flag_dim_wells`).
+
+    Returns
+    -------
+    ImageQualityResult
+        ``skipped=True`` (and ``.passed`` is ``True``) if ``metric_col``
+        is absent, rather than treating that as a failure.
+    """
+    if metric_col not in profiles.columns:
+        return ImageQualityResult(flagged_wells=[], skipped=True)
+    flagged = flag_dim_wells(
+        profiles, metric_col=metric_col, well_col=well_col, n_mad=n_mad
+    )
+    return ImageQualityResult(flagged_wells=flagged, skipped=False)
+
+
+@dataclass(frozen=True)
 class PilotValidationReport:
     """
     Aggregated pilot exit-criteria checks (plan.md section 27, technical items).
@@ -391,6 +470,9 @@ class PilotValidationReport:
     control_separation : ControlSeparationResult | None
         Biological QC gate comparing healthy vs. disease controls, or
         ``None`` if not checked.
+    image_quality : ImageQualityResult | None
+        Plate-wide dim-well check from CellProfiler's own
+        ``MeasureImageQuality`` output, or ``None`` if not checked.
     """
 
     sqlite_results: list[SqliteIntegrityResult]
@@ -399,6 +481,7 @@ class PilotValidationReport:
     crops_join_ok: bool | None = None
     crop_decode: CropDecodeResult | None = None
     control_separation: ControlSeparationResult | None = None
+    image_quality: ImageQualityResult | None = None
 
     @property
     def passed(self) -> bool:
@@ -414,6 +497,8 @@ class PilotValidationReport:
             checks.append(self.crop_decode.passed)
         if self.control_separation is not None:
             checks.append(self.control_separation.passed)
+        if self.image_quality is not None:
+            checks.append(self.image_quality.passed)
         return all(checks)
 
     def summary(self) -> dict:
@@ -443,6 +528,15 @@ class PilotValidationReport:
             ),
             "control_separation_passed": (
                 self.control_separation.passed if self.control_separation else None
+            ),
+            "image_quality_skipped": (
+                self.image_quality.skipped if self.image_quality else None
+            ),
+            "image_quality_flagged_wells": (
+                self.image_quality.flagged_wells if self.image_quality else None
+            ),
+            "image_quality_passed": (
+                self.image_quality.passed if self.image_quality else None
             ),
         }
 
@@ -520,6 +614,10 @@ def validate_pilot_run(
     if check_biology and profiles is not None:
         control_separation = check_control_separation(profiles)
 
+    image_quality = None
+    if profiles is not None:
+        image_quality = check_image_quality(profiles)
+
     return PilotValidationReport(
         sqlite_results=sqlite_results,
         schema_check=schema_check,
@@ -527,4 +625,5 @@ def validate_pilot_run(
         crops_join_ok=crops_join_ok,
         crop_decode=crop_decode,
         control_separation=control_separation,
+        image_quality=image_quality,
     )

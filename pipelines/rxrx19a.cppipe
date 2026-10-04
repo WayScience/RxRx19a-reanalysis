@@ -2,7 +2,7 @@ CellProfiler Pipeline: http://www.cellprofiler.org
 Version:5
 DateRevision:424
 GitHash:
-ModuleCount:18
+ModuleCount:19
 HasImagePlaneDetails:False
 
 Images:[module_num:1|svn_version:'Unknown'|variable_revision_number:2|show_window:False|notes:['ReRx: image list is supplied per shard via the Images module file list on the command line; this filter keeps only the 5-channel PNGs.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
@@ -83,12 +83,31 @@ NamesAndTypes:[module_num:3|svn_version:'Unknown'|variable_revision_number:8|sho
     Set intensity range from:Image bit depth
     Maximum intensity:255.0
 
-Groups:[module_num:4|svn_version:'Unknown'|variable_revision_number:2|show_window:False|notes:['ReRx: no grouping; every shard is a flat list of image sets.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MeasureImageQuality:[module_num:4|svn_version:'Unknown'|variable_revision_number:6|show_window:False|notes:['ReRx: per-image intensity/saturation/blur metrics on the DNA (w1 Hoechst) channel only -- the channel used for nuclei segmentation and the one that showed the Plate 25 AA08/E08 over-segmentation. Scoped to one channel (not all 5) because ExportToDatabase hits SQLite's Per_Image column limit otherwise. Added so a future dim-well problem shows up as an automatic per-image intensity outlier instead of requiring a manual Cellpose cross-check to notice (plan.md segmentation review).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+    Calculate metrics for which images?:Select...
+    Image count:1
+    Scale count:1
+    Threshold count:1
+    Select the images to measure:DNA
+    Include the image rescaling value?:No
+    Calculate blur metrics?:Yes
+    Spatial scale for blur measurements:20
+    Calculate saturation metrics?:Yes
+    Calculate intensity metrics?:Yes
+    Calculate thresholds?:No
+    Use all thresholding methods?:No
+    Select a thresholding method:Otsu
+    Typical fraction of the image covered by objects:0.1
+    Two-class or three-class thresholding?:Two classes
+    Minimize the weighted variance or the entropy?:Weighted variance
+    Assign pixels in the middle intensity class to the foreground or the background?:Foreground
+
+Groups:[module_num:5|svn_version:'Unknown'|variable_revision_number:2|show_window:False|notes:['ReRx: no grouping; every shard is a flat list of image sets.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Do you want to group your images?:No
     grouping metadata count:1
     Metadata category:None
 
-IdentifyPrimaryObjects:[module_num:5|svn_version:'Unknown'|variable_revision_number:15|show_window:False|notes:['ReRx: nuclei from w1 Hoechst (DNA). Diameters tuned for HRCE at 0.65 um/pixel. Freeze after pilot visual QC (plan section 12).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+IdentifyPrimaryObjects:[module_num:6|svn_version:'Unknown'|variable_revision_number:15|show_window:False|notes:['ReRx: nuclei from w1 Hoechst (DNA). Diameters tuned for HRCE at 0.65 um/pixel. Freeze after pilot visual QC (plan section 12). Thresholding method is Robust Background (not Otsu): a 24-site Cellpose cross-check found Otsu badly over-segmented low-contrast wells (mean abs count error vs. Cellpose 107% -> 13% after this change; see plan.md segmentation review).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the input image:DNA
     Name the primary objects to be identified:Nuclei
     Typical diameter of objects, in pixel units (Min,Max):12,60
@@ -107,7 +126,7 @@ IdentifyPrimaryObjects:[module_num:5|svn_version:'Unknown'|variable_revision_num
     Use advanced settings?:Yes
     Threshold setting version:12
     Threshold strategy:Global
-    Thresholding method:Otsu
+    Thresholding method:Robust Background
     Threshold smoothing scale:1.3488
     Threshold correction factor:1.0
     Lower and upper bounds on threshold:0.0,1.0
@@ -124,7 +143,7 @@ IdentifyPrimaryObjects:[module_num:5|svn_version:'Unknown'|variable_revision_num
     # of deviations:2.0
     Thresholding method:Otsu
 
-IdentifySecondaryObjects:[module_num:6|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:['ReRx: whole cells by propagation from Nuclei on w3 Phalloidin (actin) cytoplasmic stain.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+IdentifySecondaryObjects:[module_num:7|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:['ReRx: whole cells by propagation from Nuclei on w3 Phalloidin (actin) cytoplasmic stain.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the input objects:Nuclei
     Name the objects to be identified:Cells
     Select the method to identify the secondary objects:Propagation
@@ -154,22 +173,22 @@ IdentifySecondaryObjects:[module_num:6|svn_version:'Unknown'|variable_revision_n
     # of deviations:2.0
     Thresholding method:Otsu
 
-IdentifyTertiaryObjects:[module_num:7|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:['ReRx: cytoplasm = Cells minus Nuclei.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+IdentifyTertiaryObjects:[module_num:8|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:['ReRx: cytoplasm = Cells minus Nuclei.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the larger identified objects:Cells
     Select the smaller identified objects:Nuclei
     Name the tertiary objects to be identified:Cytoplasm
     Shrink smaller object prior to subtraction?:Yes
 
-MeasureObjectIntensity:[module_num:8|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:['ReRx: intensity in all 5 channels on Nuclei, Cells, Cytoplasm.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MeasureObjectIntensity:[module_num:9|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:['ReRx: intensity in all 5 channels on Nuclei, Cells, Cytoplasm.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select images to measure:DNA, ConA, Actin, RNA, Golgi
     Select objects to measure:Nuclei, Cells, Cytoplasm
 
-MeasureObjectSizeShape:[module_num:9|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:['ReRx: size and shape for Nuclei, Cells, Cytoplasm.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MeasureObjectSizeShape:[module_num:10|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:['ReRx: size and shape for Nuclei, Cells, Cytoplasm.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select object sets to measure:Nuclei, Cells, Cytoplasm
     Calculate the Zernike features?:Yes
     Calculate the advanced features?:No
 
-MeasureTexture:[module_num:10|svn_version:'Unknown'|variable_revision_number:7|show_window:False|notes:['ReRx: Haralick texture on all 5 channels for Nuclei, Cells, Cytoplasm (plan section 12).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MeasureTexture:[module_num:11|svn_version:'Unknown'|variable_revision_number:7|show_window:False|notes:['ReRx: Haralick texture on all 5 channels for Nuclei, Cells, Cytoplasm (plan section 12).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select images to measure:DNA, ConA, Actin, RNA, Golgi
     Select objects to measure:Nuclei, Cells, Cytoplasm
     Enter how many gray levels to measure the texture at:256
@@ -177,7 +196,7 @@ MeasureTexture:[module_num:10|svn_version:'Unknown'|variable_revision_number:7|s
     Measure whole images or objects?:Both
     Texture scale to measure:3
 
-MeasureGranularity:[module_num:11|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:['ReRx: granularity spectra for Nuclei, Cells, Cytoplasm across channels.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MeasureGranularity:[module_num:12|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:['ReRx: granularity spectra for Nuclei, Cells, Cytoplasm across channels.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select images to measure:DNA, ConA, Actin, RNA, Golgi
     Measure within objects?:Yes
     Select objects to measure:Nuclei, Cells, Cytoplasm
@@ -186,25 +205,25 @@ MeasureGranularity:[module_num:11|svn_version:'Unknown'|variable_revision_number
     Radius of structuring element:10
     Range of the granular spectrum:16
 
-ConvertObjectsToImage:[module_num:12|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:['ReRx: per-object labeled mask for Nuclei. uint16 mode writes the object number of each object into the mask (pixel value = object number, background = 0) so segmentation stays reusable for crops and downstream per-object work (plan section 14).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+ConvertObjectsToImage:[module_num:13|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:['ReRx: per-object labeled mask for Nuclei. uint16 mode writes the object number of each object into the mask (pixel value = object number, background = 0) so segmentation stays reusable for crops and downstream per-object work (plan section 14).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the input objects:Nuclei
     Name the output image:MaskNuclei
     Select the color format:uint16
     Select the colormap:Default
 
-ConvertObjectsToImage:[module_num:13|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:['ReRx: per-object labeled mask for Cells. uint16 mode writes the object number of each object into the mask (pixel value = object number, background = 0).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+ConvertObjectsToImage:[module_num:14|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:['ReRx: per-object labeled mask for Cells. uint16 mode writes the object number of each object into the mask (pixel value = object number, background = 0).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the input objects:Cells
     Name the output image:MaskCells
     Select the color format:uint16
     Select the colormap:Default
 
-ConvertObjectsToImage:[module_num:14|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:['ReRx: per-object labeled mask for Cytoplasm. uint16 mode writes the object number of each object into the mask (pixel value = object number, background = 0).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+ConvertObjectsToImage:[module_num:15|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:['ReRx: per-object labeled mask for Cytoplasm. uint16 mode writes the object number of each object into the mask (pixel value = object number, background = 0).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the input objects:Cytoplasm
     Name the output image:MaskCytoplasm
     Select the color format:uint16
     Select the colormap:Default
 
-SaveImages:[module_num:15|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:['ReRx: save Nuclei labeled mask as TIFF. Bit depth No conversion keeps object numbers exact (16-bit integer would rescale int32 labels and collapse distinct objects onto the same value).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+SaveImages:[module_num:16|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:['ReRx: save Nuclei labeled mask as TIFF. Bit depth No conversion keeps object numbers exact (16-bit integer would rescale int32 labels and collapse distinct objects onto the same value).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the type of image to save:Image
     Select the image to save:MaskNuclei
     Select method for constructing file names:From image filename
@@ -224,7 +243,7 @@ SaveImages:[module_num:15|svn_version:'Unknown'|variable_revision_number:16|show
     How to save the series:T (Time)
     Save with lossless compression?:Yes
 
-SaveImages:[module_num:16|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:['ReRx: save Cells labeled mask as TIFF. Bit depth No conversion keeps object numbers exact (16-bit integer would rescale int32 labels and collapse distinct objects onto the same value).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+SaveImages:[module_num:17|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:['ReRx: save Cells labeled mask as TIFF. Bit depth No conversion keeps object numbers exact (16-bit integer would rescale int32 labels and collapse distinct objects onto the same value).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the type of image to save:Image
     Select the image to save:MaskCells
     Select method for constructing file names:From image filename
@@ -244,7 +263,7 @@ SaveImages:[module_num:16|svn_version:'Unknown'|variable_revision_number:16|show
     How to save the series:T (Time)
     Save with lossless compression?:Yes
 
-SaveImages:[module_num:17|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:['ReRx: save Cytoplasm labeled mask as TIFF. Bit depth No conversion keeps object numbers exact (16-bit integer would rescale int32 labels and collapse distinct objects onto the same value).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+SaveImages:[module_num:18|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:['ReRx: save Cytoplasm labeled mask as TIFF. Bit depth No conversion keeps object numbers exact (16-bit integer would rescale int32 labels and collapse distinct objects onto the same value).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the type of image to save:Image
     Select the image to save:MaskCytoplasm
     Select method for constructing file names:From image filename
@@ -264,7 +283,7 @@ SaveImages:[module_num:17|svn_version:'Unknown'|variable_revision_number:16|show
     How to save the series:T (Time)
     Save with lossless compression?:Yes
 
-ExportToDatabase:[module_num:18|svn_version:'Unknown'|variable_revision_number:28|show_window:False|notes:['ReRx: per-shard SQLite, one table per object type, per-image means kept (used by site-level QC), object relationships exported for compartment joins (plan sections 12-13).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+ExportToDatabase:[module_num:19|svn_version:'Unknown'|variable_revision_number:28|show_window:False|notes:['ReRx: per-shard SQLite, one table per object type, per-image means kept (used by site-level QC), object relationships exported for compartment joins (plan sections 12-13).']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Database type:SQLite
     Database name:DefaultDB
     Add a prefix to table names?:No

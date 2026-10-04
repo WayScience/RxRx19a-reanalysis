@@ -391,6 +391,209 @@ Pilot plan:
 
 Freeze segmentation parameters after pilot visual QC.
 
+Pilot segmentation review (real pilot-x8 data, 125,855 nuclei, HRCE-1 plate 25):
+the configured nucleus diameter range (12-60 px) genuinely clips a small tail
+of detected nuclei at both bounds (about 3.8% below 14 px, about 0.5% above
+58 px) -- `Nuclei_AreaShape_Area` min/max in the real output match
+`pi*(d/2)^2` for d=12 and d=60 almost exactly, confirming the range is an
+active filter, not just documentation. The clipped tail is not strongly
+enriched in `active_untreated` versus `mock`/`uv` wells, so it looks like
+general segmentation noise (partial nuclei, debris, doublets at the
+boundary) rather than clipped cytopathic/syncytial phenotype.
+
+Cellpose cross-check (24 real pilot sites, 6 wells x 4 sites, 2 wells each
+of active/uv/mock, `scripts/segmentation_cellpose_check.py`): CellProfiler
+found 7,039 nuclei total across the 24 sites versus Cellpose's independent,
+auto-diameter estimate of 3,360 -- about 2.1x more. But this is not a
+uniform under/over-count: 16 of 24 sites (AA02, AA09, AA16, E16) have
+CellProfiler counts within +/-25% of Cellpose's (125-200 vs Cellpose's
+100-168), while 8 sites across two wells (AA08, E08) have CellProfiler
+counts 3-7x Cellpose's (349-912 vs Cellpose's 120-161). The over-counted
+wells have visibly lower-contrast w1 (Hoechst) images (std ~3.0-3.6,
+p99 intensity ~16-19, max ~36-93) than the normal wells (std ~4.0-4.8,
+p99 ~20-24, max ~57-145) -- same two conditions (uv, mock) have both a
+normal-contrast well and a low-contrast, over-segmented well, so this
+tracks with per-well image brightness/contrast, not perturbation. Most of
+CellProfiler's excess objects in the bad wells are mid-range diameter
+(17-33 px, not clipped at the 12 px floor), so this is not the same
+clipping effect as above -- it looks like CellProfiler's intensity
+threshold is splitting dim nuclei into multiple small fragments, or
+picking up background texture as nuclei, in low-contrast fields. This is
+a real segmentation-quality gap the correlation check above did not
+catch (that check only looked at size-clipping, not spurious-object
+over-counting). Recommendation: before a full run, review CellProfiler's
+`IdentifyPrimaryObjects` thresholding settings (e.g. an adaptive or
+per-image threshold method) against a handful of low-contrast fields, and
+re-run this same Cellpose check after any threshold change to confirm the
+spurious-object problem shrinks. Current diameter range (12-60 px) itself
+is not the issue; thresholding sensitivity to per-field contrast is.
+
+Threshold-strategy test (same 24 sites, re-ran `IdentifyPrimaryObjects`
+with each of 3 settings changes isolated, compared object counts against
+the saved Cellpose reference): no illumination-correction step exists in
+`pipelines/rxrx19a.cppipe` today (confirmed: no `CorrectIllumination*`
+module). Illumination correction (CellProfiler's own module, or BaSiC)
+targets within-field shading/vignetting; what this plate showed is
+whole-well brightness differences (AA08/E08 dim, AA02/AA09/AA16/E16
+normal), which isn't the problem that tool fixes, so it was not tried.
+
+Instead tested the threshold setting directly implicated by the earlier
+finding:
+
+- `Threshold strategy: Adaptive` (same Otsu method, computed per-window
+  instead of per-image): made it worse (total 8,293 vs. baseline's 7,039;
+  AA08/E08 sites went to 600-900+ objects, higher than baseline).
+- `Threshold correction factor: 1.3` (require a brighter margin above
+  the computed threshold): partial improvement (total 5,203, down from
+  7,039) but AA08/E08 still ran 2-3x over Cellpose's counts.
+- `Thresholding method: Robust Background` (assumes the image is mostly
+  background, trims the brightest/dimmest 5% of pixels, thresholds at
+  mean + 2 std of what remains, instead of Otsu's two/three-peak split):
+  fixed it. Total count 3,754 vs. Cellpose's 3,360 (baseline was 7,039).
+  Mean absolute per-site error vs. Cellpose dropped from 107% (baseline)
+  to 13%; on just the two bad wells, from 302% to 27.5%. The remaining
+  objects in AA08/E08 are normal-sized (median ~197 um^2, versus ~200-290
+  um^2 in the unaffected wells under either method) -- not a handful of
+  tiny fragments coincidentally summing to the right count, but objects
+  that look like real nuclei. Good wells (AA02/AA09/AA16/E16) were
+  essentially unchanged by the switch (good-well mean error 9.8% baseline
+  vs. 6.2% Robust Background), so this is not a tradeoff against the
+  wells that were already fine.
+
+Recommendation: switch `IdentifyPrimaryObjects`'s nuclei thresholding
+method from `Otsu` to `Robust Background` in `pipelines/rxrx19a.cppipe`
+(keep `Threshold strategy: Global`, `Threshold correction factor: 1.0`;
+only the one setting changes). This is a single pipeline-file edit, not a
+new tool or dependency, and it stays within CellProfiler's own thresholding
+options, so it scales to the full run the same way the rest of the
+pipeline does -- no extra preprocessing stage, no illumination-correction
+step needed. Re-validate on a fresh pilot subset once the pipeline change
+lands (plan.md's existing Cellpose cross-check script,
+`scripts/segmentation_cellpose_check.py`, already supports rerunning this
+exact comparison).
+
+Cross-plate re-validation with a real Cellpose reference (same 6-well/
+24-site sampling pattern, applied to HRCE-1 Plate 1 and Plate 13, each
+with its own 48-site Cellpose nuclei run -- not the "no reference, Otsu
+vs. Robust Background compared only to each other" placeholder from the
+first pass): neither plate had a site as extreme as Plate 25's AA08/E08
+(worst case here was 226 objects on one site, versus 349-912 on Plate
+25's bad wells), so this is a milder test of the same effect. Mean
+absolute percent error vs. Cellpose across all 48 sites: Otsu 7.3%,
+Robust Background 5.0% -- a real but modest improvement when averaged
+over everything. Split by plate: Plate 1 was close either way (Otsu
+4.8%, Robust Background 4.4%, total counts 3,665 vs. 3,622 against a
+Cellpose total of 3,627); Plate 13 showed a clearer win (Otsu 9.8%,
+Robust Background 5.5%, total counts 3,694 vs. 3,391 against a Cellpose
+total of 3,445), concentrated in the dimmest sites found during the
+earlier contrast scan (Plate 13's E16 wells, max pixel ~38-53): Otsu
+overshot those sites by 36-51%, Robust Background's worst miss on the
+same plate was 15%. Conclusion: Robust Background's improvement
+generalizes in direction and does not introduce a new failure mode
+(no under-segmentation -- see the size-sanity check above) on plates
+that don't share Plate 25's severity of dim wells; it is a reasonable
+default for the full run. If a future plate turns out to have a dim
+well as extreme as Plate 25's, rerun
+`scripts/segmentation_cellpose_check.py` against it for its own ground-
+truth check the same way Plate 25, 1, and 13 were each validated here,
+rather than assuming the Plate-25 numbers transfer directly. The full
+reusable procedure (sample selection, threshold-variant pipeline
+generation, Cellpose reference, count/contrast comparison) is written up
+as a repeatable per-dataset pre-step in
+`docs/src/segmentation-config-check.md`, backed by unit-tested functions
+in `src/rerx/segmentation_check.py`.
+
+Embedded production monitoring (so a future dim-well problem surfaces
+automatically instead of needing a manual Cellpose investigation to
+notice it): added CellProfiler's own `MeasureImageQuality` module to
+`pipelines/rxrx19a.cppipe`, scoped to the DNA (w1 Hoechst) channel only
+-- the channel used for nuclei segmentation and the one that showed the
+Plate 25 AA08/E08 problem. Running it on all 5 channels hits SQLite's
+`Per_Image` column limit in `ExportToDatabase` (confirmed: crashes with
+"too many columns on Per_Image"); DNA-only avoids that. Verified on
+Alpine against 6 real Plate 25 sites: adds ~0.2-0.4s per image
+(negligible next to CellProfiler's own segmentation/measurement time --
+the with-module run was not measurably slower than the baseline run in
+the same job), and the resulting `Image_ImageQuality_MaxIntensity_DNA`
+column correctly separates AA08 (0.17-0.26) from the normal wells
+(0.40-0.57) end to end through `CytoTable`'s SQLite-to-Parquet
+conversion (`RERX_JOINS` in `src/rerx/cytotable.py` extended to keep
+`Image_ImageQuality_*` columns, which the base join dropped).
+`rerx.validate.check_image_quality` (built on
+`rerx.segmentation_check.flag_dim_wells`, a median/MAD outlier check
+across a plate's wells) turns that column into a flagged-wells list,
+wired into `PilotValidationReport`/`validate_pilot_run` as
+`image_quality` alongside the other pilot exit-criteria checks. Cellpose
+itself is not, and never will be, part of production -- it only served
+as the one-time ground truth used to pick and validate Robust
+Background; `MeasureImageQuality` is the ongoing, in-pipeline substitute
+for noticing the next dim-well problem without rerunning that
+investigation by hand. Needs several wells to resolve (a 2-3 well smoke
+test won't reliably flag a known-dim well; a real pilot plate with 5+
+wells per condition does, per the Plate 1/13/25 validation above).
+
+Comparison against WayScience's `pediatric_cancer_atlas_profiling`
+repo's CellProfiler pipelines (a similar Cell Painting assay, different
+cell lines/stains): their nuclei `IdentifyPrimaryObjects` uses
+`Thresholding method: Minimum Cross-Entropy`, not Otsu or Robust
+Background -- tested as a third variant against the same 24 Plate 25
+sites and the same saved Cellpose reference
+(`reports/data/segmentation_cellpose_comparison.json`), using the
+production pipeline (Robust Background default, `MeasureImageQuality`
+now embedded) as the base and swapping only the nuclei threshold
+method. Pooled mean absolute percent error vs. Cellpose across all 24
+sites: Otsu 107.1%, Robust Background 13.3%, Minimum Cross-Entropy
+29.8%. Per-well totals on the two known-bad wells (Cellpose reference in
+parens): AA08 -- Otsu 2,364, Robust Background 739, Minimum
+Cross-Entropy 1,052 (Cellpose 585); E08 -- Otsu 2,251, Robust Background
+713, Minimum Cross-Entropy 915 (Cellpose 557). On the always-fine well
+(AA02, Cellpose 537) all three were close (Otsu 581, Robust Background
+586, Minimum Cross-Entropy 601) -- confirming (again) this is specifically
+a dim-well over-segmentation problem, not a general threshold quality
+difference. Visual overlay spot-check (DNA channel with mask boundaries
+drawn on top) on AA08 site 1 matches the counts: Otsu's overlay is a
+dense mesh of tiny fragmented regions covering nearly the whole dim
+field; Robust Background's overlay shows clean individually-outlined
+nuclei matching what's visible in the raw image; Minimum
+Cross-Entropy's overlay is intermediate -- fewer large merged/fragmented
+blobs than Otsu, but still visibly messier than Robust Background's
+clean single-nucleus outlines, several two-three-nucleus clumps not
+split. Robust Background remains the better choice for this pipeline;
+Minimum Cross-Entropy is not a recommended change. (Overlay images and
+the comparison script are scratch-only, not part of the committed repo,
+matching how earlier threshold-variant investigations in this section
+were also one-off scratch comparisons with only the numeric conclusion
+kept in this file.)
+
+Added a pixel-overlap (IoU) check on the 3 spot-check sites (AA08,
+E08, AA02, same sites as the overlay images above) alongside the
+count-only comparison, since two masks can agree on total count while
+segmenting different regions. Reused the exact greedy best-IoU
+matching logic already validated in
+`scripts/segmentation_cellpose_check.py` (`_match_masks`,
+`IOU_MATCH_THRESHOLD = 0.5`) against a freshly regenerated Cellpose
+reference mask for each site (counts matched the saved reference
+exactly: AA08 149, E08 132). Results confirm the count-based
+conclusion and add detail it couldn't show: on the two bad wells, the
+fraction of CellProfiler nuclei that actually land on a real Cellpose
+nucleus (>=50% IoU) is Otsu 1-4%, Minimum Cross-Entropy 13-15%, Robust
+Background 46-48% -- the gap is much larger by this measure than by
+count alone, because Otsu's and Minimum Cross-Entropy's "right-ish"
+counts on these wells are partly coincidental (lots of small spurious
+fragments summing close to the true count, not matching real nuclei
+positions). One honest nuance IoU surfaced that counts alone missed:
+on the always-fine well AA02, Minimum Cross-Entropy's match rate (33%,
+pixel IoU 0.36) actually edges out Robust Background's (18%, pixel IoU
+0.30) -- Robust Background's AA02 object count was closer to
+Cellpose's, but its object boundaries there overlap real nuclei
+somewhat less precisely. This doesn't change the recommendation (the
+bad-well advantage, where the real production problem lives, dwarfs
+this small well-matched-well difference), but is reported as-is rather
+than only showing the metric that favors the chosen method. Full
+numbers and a side-by-side visual comparison (DNA channel + mask
+boundary overlay, one column per method, per spot-check site) are in a
+scratch HTML page (not committed, same reasoning as above).
+
 Each Slurm task processes a moderate shard of nearby image sets. Batch by data locality.
 
 Do not start with one job per image.

@@ -15,6 +15,7 @@ DATA_DIR = REPORTS_DIR / "data"
 REPORTS = {
     "phenotypic_overview.html": "phenotypic_report_data.json",
     "buscar_reversal.html": "buscar_report_data.json",
+    "pipeline_run.html": "pipeline_run_report_data.json",
 }
 
 PLACEHOLDER = "__DATA__"
