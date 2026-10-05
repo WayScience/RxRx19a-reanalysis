@@ -73,6 +73,8 @@ flowchart TD
     R --> R1["phenotypic_overview.html<br/>CellProfiler vs. MorphEm vs.<br/>Recursion embeddings"]
     R --> R2["buscar_reversal.html<br/>on/off reversal scores<br/>per treatment"]
     R --> R3["pipeline_run.html<br/>run health: timing,<br/>QC pass/fail, flag rates"]
+    R --> R4["segmentation_check.html<br/>Cellpose cross-check:<br/>why Robust Background"]
+    R --> R5["decisions.html<br/>other component decisions,<br/>options tried, outcomes"]
 ```
 
 Two runners drive this pipeline:

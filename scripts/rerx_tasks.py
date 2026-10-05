@@ -435,9 +435,12 @@ def _fuse_finalized_profiles() -> None:
     import pandas as pd
 
     from rerx.fuse import (
+        FUSED_LAYOUT,
+        FUSION_KIND,
         fuse_features,
         pair_fused_partitions,
         write_fused_profiles,
+        write_fusion_sidecar,
     )
 
     cp_selected = sorted(
@@ -463,28 +466,69 @@ def _fuse_finalized_profiles() -> None:
     cp_rows_total = 0
     morphem_rows_total = 0
     dropped_rows_total = 0
+    cp_feature_cols = 0
+    morphem_feature_cols = 0
     partitions_written: list[Path] = []
     for cp_path, me_path in pairs:
         cp_df = pd.read_parquet(cp_path)
         me_df = pd.read_parquet(me_path)
         fused = fuse_features(cp_df, me_df)
         written = write_fused_profiles(
-            fused, RUN_DIR, cp_rows=len(cp_df), morphem_rows=len(me_df)
+            fused,
+            RUN_DIR,
+            cp_rows=len(cp_df),
+            morphem_rows=len(me_df),
+            write_sidecar=False,
         )
-        dropped = max(len(cp_df), len(me_df)) - len(fused)
+        dropped_cp = len(cp_df) - len(fused)
+        dropped_me = len(me_df) - len(fused)
+        dropped = dropped_cp + dropped_me
         if dropped:
             _log(
                 f"fused {cp_path.parent.parent.name}/{cp_path.parent.name}: "
-                f"dropped {dropped} non-overlapping cell(s) "
+                f"dropped {dropped_cp} CP + {dropped_me} MorphEm "
+                f"non-overlapping cell(s) "
                 f"(CP {len(cp_df)}, MorphEm {len(me_df)} -> {len(fused)} fused)"
             )
         partitions_written.extend(written)
         fused_rows += len(fused)
         fused_cols = fused.shape[1]
+        cp_feature_cols = len(
+            [
+                c
+                for c in fused.columns
+                if c.startswith(("Cells_", "Cytoplasm_", "Nuclei_"))
+            ]
+        )
+        morphem_feature_cols = len(
+            [c for c in fused.columns if c.startswith("Morphem_")]
+        )
         cp_rows_total += len(cp_df)
         morphem_rows_total += len(me_df)
         dropped_rows_total += dropped
         del fused, cp_df, me_df
+    # Accumulated totals across every plate pair, not any single pair's
+    # counts -- write_fused_profiles(write_sidecar=False) above skipped
+    # the per-pair sidecar write so this is the only fusion.json write.
+    write_fusion_sidecar(
+        RUN_DIR,
+        {
+            "kind": FUSION_KIND,
+            "layout": FUSED_LAYOUT,
+            "join_key": "Metadata_cell_id",
+            "sources": {
+                "cellprofiler": "profiles/cellprofiler/feature_selected",
+                "morphem": "profiles/morphem/feature_selected",
+            },
+            "rows": fused_rows,
+            "cellprofiler_feature_cols": cp_feature_cols,
+            "morphem_feature_cols": morphem_feature_cols,
+            "cellprofiler_input_rows": cp_rows_total,
+            "morphem_input_rows": morphem_rows_total,
+            "cellprofiler_rows_dropped": cp_rows_total - fused_rows,
+            "morphem_rows_dropped": morphem_rows_total - fused_rows,
+        },
+    )
     _log(
         f"fused: {fused_rows} cells x {fused_cols} cols from "
         f"{len(pairs)} plate(s) -> {len(partitions_written)} partition(s) "

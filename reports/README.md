@@ -1,6 +1,6 @@
 # ReRx pilot reports
 
-Three self-contained HTML reports built from the pilot run's data (HRCE-1
+Five self-contained HTML reports built from the pilot run's data (HRCE-1
 Plate 25, pipeline report from run `pilot-x8`). Each report embeds its data
 directly, so it opens and works from a plain file:// URL with no server, no
 network, and no build step.
@@ -21,29 +21,47 @@ network, and no build step.
   outlier-flag rates, CellProfiler/MorphEm fusion drop counts, and
   buscar skip reasons for a specific run (currently `pilot-x8`, 125,855
   cells across 176 wells).
+- `segmentation_check.html` — the Cellpose-vs-CellProfiler nuclei
+  segmentation cross-check (plan.md's segmentation review): shows the
+  Otsu-threshold finding that motivated switching to Robust Background
+  (two dim wells out of six sampled, 3-7x over-segmented; 304% mean
+  abs. count error vs. Cellpose on those two wells, 9% on the other
+  four). A methods/decision report, not a biology result.
+- `decisions.html` — a curated record of other pipeline-configuration
+  decisions (image-quality QC scope, illumination correction, buscar
+  aggregation level, crop JPEG quality, pilot run size): options
+  actually tried, what happened, and which one is in use today. Most
+  entries are "decided"; one (crop JPEG quality) is still "pending"
+  the lossless-vs-JPEG validation plan.md calls for.
 
 ## Screenshots
 
-Static full-page screenshots of all three reports live in `screenshots/`, so
+Static full-page screenshots of all five reports live in `screenshots/`, so
 they render inline in GitHub PRs without opening the HTML files:
 
 - `screenshots/phenotypic_overview.png`
 - `screenshots/buscar_reversal.png`
 - `screenshots/pipeline_run.png`
+- `screenshots/segmentation_check.png`
+- `screenshots/decisions.png`
 
 ## Regenerating the data
 
-Five scripts build the report payloads from local copies of the pilot
-run's Parquet files (synced from Alpine into `data/`, which is
+Seven scripts build the report payloads. Four read local copies of the
+pilot run's Parquet files (synced from Alpine into `data/`, which is
 gitignored — regenerate it, don't expect it to be there after a fresh
-clone):
+clone); two (`segmentation_report_data.py`, `decisions_report_data.py`)
+read only data already committed under `reports/data/` or `plan.md`,
+so they need no sync step:
 
 ```bash
 uv run python reports/scripts/prepare_data.py        # core payloads for both biology reports
 uv run python reports/scripts/morphem_report_data.py <run_dir> <out.json>  # MorphEm QC + PCA comparison payload
 uv run --frozen --with umap-learn python reports/scripts/umap_report_data.py  # UMAP coordinates
 uv run python reports/scripts/pipeline_run_report_data.py <run_dir> --sacct-file <sacct.txt>  # pipeline run report payload
-uv run python reports/scripts/embed_data.py          # embed the JSON payloads into all three HTML files
+uv run python reports/scripts/segmentation_report_data.py  # segmentation threshold check payload (reads reports/data/ only)
+uv run python reports/scripts/decisions_report_data.py     # pipeline decisions payload (hand-curated, no external data)
+uv run python reports/scripts/embed_data.py          # embed the JSON payloads into all five HTML files
 ```
 
 `morphem_report_data.py` reads the finalized MorphEm table from the run's

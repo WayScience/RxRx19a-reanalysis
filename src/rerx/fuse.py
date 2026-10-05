@@ -205,10 +205,12 @@ def write_fused_profiles(
     *,
     cp_rows: int | None = None,
     morphem_rows: int | None = None,
+    write_sidecar: bool = True,
 ) -> list[Path]:
     """
-    Write the fused table, partitioned by experiment and plate, plus the
-    fusion.json label sidecar at ``profiles/fused/fusion.json``.
+    Write the fused table, partitioned by experiment and plate, plus
+    (by default) the fusion.json label sidecar at
+    ``profiles/fused/fusion.json``.
 
     Parameters
     ----------
@@ -222,6 +224,13 @@ def write_fused_profiles(
         (recorded in the sidecar's drop-count fields).
     morphem_rows : int | None
         Row count of the MorphEm frame before the inner join, if known.
+    write_sidecar : bool
+        Whether to write ``fusion.json`` from this call's ``fused``
+        frame alone. Set ``False`` when fusing multiple experiment/plate
+        pairs one at a time (plan.md's per-plate batching): writing the
+        sidecar after every pair overwrites it with that pair's counts
+        instead of the run's totals -- call :func:`write_fusion_sidecar`
+        once after accumulating totals across every pair instead.
 
     Returns
     -------
@@ -233,7 +242,6 @@ def write_fused_profiles(
     ValueError
         If partition columns are missing from the fused frame.
     """
-    import json
     from pathlib import Path
 
     from rerx.cytotable import plate_partitions
@@ -262,13 +270,44 @@ def write_fused_profiles(
         tmp_path.replace(final_path)
         written.append(final_path)
 
-    sidecar = run_root / "profiles" / "fused" / "fusion.json"
-    sidecar.write_text(
-        json.dumps(
+    if write_sidecar:
+        write_fusion_sidecar(
+            run_root,
             fusion_metadata(fused, cp_rows=cp_rows, morphem_rows=morphem_rows),
-            indent=2,
-            sort_keys=True,
         )
-        + "\n"
-    )
     return written
+
+
+def write_fusion_sidecar(run_root: Path, metadata: dict[str, Any]) -> Path:
+    """
+    Write ``profiles/fused/fusion.json`` from an already-built metadata dict.
+
+    Separated from :func:`write_fused_profiles` so callers fusing more
+    than one experiment/plate pair (plan.md's per-plate batching) can
+    accumulate ``rows``/``cellprofiler_input_rows``/``morphem_input_rows``
+    totals across every pair and write the sidecar once, instead of it
+    being overwritten by each pair's own counts.
+
+    Parameters
+    ----------
+    run_root : Path
+        Run root directory; the sidecar lands at
+        ``<run_root>/profiles/fused/fusion.json``.
+    metadata : dict[str, object]
+        A dict shaped like :func:`fusion_metadata`'s output (typically
+        that function's output with ``rows``/``cellprofiler_input_rows``/
+        ``morphem_input_rows``/drop fields replaced with run totals).
+
+    Returns
+    -------
+    Path
+        The sidecar path written.
+    """
+    import json
+    from pathlib import Path
+
+    run_root = Path(run_root)
+    sidecar = run_root / "profiles" / "fused" / "fusion.json"
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+    return sidecar

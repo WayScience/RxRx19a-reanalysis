@@ -437,9 +437,11 @@ def check_image_quality(
     -------
     ImageQualityResult
         ``skipped=True`` (and ``.passed`` is ``True``) if ``metric_col``
-        is absent, rather than treating that as a failure.
+        or ``well_col`` is absent, rather than treating that as a
+        failure or raising a ``KeyError`` from the groupby inside
+        :func:`rerx.segmentation_check.flag_dim_wells`.
     """
-    if metric_col not in profiles.columns:
+    if metric_col not in profiles.columns or well_col not in profiles.columns:
         return ImageQualityResult(flagged_wells=[], skipped=True)
     flagged = flag_dim_wells(
         profiles, metric_col=metric_col, well_col=well_col, n_mad=n_mad

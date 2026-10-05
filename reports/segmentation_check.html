@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ReRx Pilot — Segmentation Configuration Check</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --ink: #e8eaed;
+    --ink-muted: #9aa3ad;
+    --surface: #171a20;
+    --surface-alt: #0d0f13;
+    --border: #2a2f38;
+    --accent: #e0a63e;
+    --dim: #e05b5b;
+    --normal: #3fb37e;
+    --cellprofiler: #58a6c9;
+    --cellpose: #8494e8;
+    --good: #3fb37e;
+    --bad: #e05b5b;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--surface-alt);
+    line-height: 1.5;
+  }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 28px max(40px, calc((100% - 1180px) / 2 + 40px)) 22px;
+    text-align: left;
+  }
+  header h1 { margin: 0 0 4px; font-size: 22px; font-weight: 700; }
+  header h1 a { color: inherit; text-decoration: none; }
+  header h1 a:hover { color: var(--accent); }
+  header p.subtitle { margin: 0; color: var(--ink-muted); font-size: 14px; }
+  .badges { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; justify-content: flex-start; }
+  .badge {
+    font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+    background: var(--surface-alt); border: 1px solid var(--border); color: var(--ink-muted);
+  }
+  .badge.ok { background: #12281c; color: var(--good); border-color: #1e4a33; }
+  .badge.bad { background: #2b1414; color: var(--bad); border-color: #4a1e1e; }
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 40px 60px; }
+  section { margin-bottom: 56px; }
+  section h2 {
+    font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--ink-muted); margin: 0 0 14px; font-weight: 700;
+    text-align: left;
+  }
+  section .lede { font-size: 15px; color: var(--ink); max-width: 760px; margin: 0 0 24px; text-align: left; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 24px 28px;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  @media (max-width: 860px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    header, main { padding-left: 20px; padding-right: 20px; }
+  }
+  .stat { text-align: left; }
+  .stat .value { font-size: 26px; font-weight: 700; }
+  .stat .value.good { color: var(--good); }
+  .stat .value.bad { color: var(--bad); }
+  .stat .label { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+  .plot-title { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+  .plot-sub { font-size: 12px; color: var(--ink-muted); margin-bottom: 10px; }
+  canvas { max-width: 100%; }
+  .note {
+    font-size: 13px; color: var(--ink-muted); background: var(--surface-alt);
+    border-left: 3px solid var(--accent); padding: 12px 16px; border-radius: 4px; margin-top: 18px;
+  }
+  .note + .note { margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--ink-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.dim { color: var(--bad); font-weight: 600; }
+  footer { text-align: left; font-size: 12px; color: var(--ink-muted); padding: 20px; line-height: 1.9; }
+  footer a { color: var(--accent); }
+  code { background: var(--surface-alt); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><a href="https://github.com/WayScience/RxRx19a-reanalysis">ReRx Pilot — Segmentation Configuration Check</a></h1>
+  <p class="subtitle">HRCE-1, Plate 25 &middot; 24 sites, 6 wells &middot; Cellpose cross-check</p>
+  <div class="badges" id="statusBadges"></div>
+</header>
+
+<main>
+
+  <section>
+    <h2>What this report shows</h2>
+    <p class="lede">
+      Before freezing CellProfiler's nuclei thresholding settings, the pipeline
+      ran an independent cross-check: Cellpose's generic nuclei model (which
+      does not use CellProfiler's threshold-based approach at all) against
+      CellProfiler's own nuclei counts, on a small, representative sample of
+      real pilot sites. This is a methods/decision report &mdash; it explains
+      why one pipeline setting changed, not a biology result. See
+      <code>docs/src/segmentation-config-check.md</code> for the full reusable
+      procedure and <code>plan.md</code>'s segmentation review section for the
+      complete investigation, including the post-fix re-validation numbers.
+    </p>
+    <div class="grid-3">
+      <div class="card stat"><div class="value" id="statSites">—</div><div class="label">sites sampled (6 wells &times; 4 sites)</div></div>
+      <div class="card stat"><div class="value" id="statCpTotal">—</div><div class="label">CellProfiler nuclei (pooled)</div></div>
+      <div class="card stat"><div class="value" id="statCpoTotal">—</div><div class="label">Cellpose nuclei (pooled, independent reference)</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The finding: two dim wells, badly over-segmented</h2>
+    <p class="lede">
+      This comparison is the data that surfaced the problem, run with
+      CellProfiler's default <strong>Otsu</strong> thresholding. Two wells
+      (AA08, E08) were measurably dimmer than the other four sampled wells
+      and came out 3-7&times; over Cellpose's independent count, while every
+      other well matched Cellpose within about &plusmn;25%.
+    </p>
+    <div class="grid-2">
+      <div class="card stat">
+        <div class="value bad" id="statDimError">—</div>
+        <div class="label">mean abs. % error vs. Cellpose, dim wells (AA08, E08)</div>
+      </div>
+      <div class="card stat">
+        <div class="value good" id="statNormalError">—</div>
+        <div class="label">mean abs. % error vs. Cellpose, other 4 wells</div>
+      </div>
+    </div>
+    <p class="note">
+      This gap is why CellProfiler's own <code>MeasureImageQuality</code>
+      module (DNA channel only) is now embedded in production
+      (<code>pipelines/rxrx19a.cppipe</code>) and checked automatically by
+      <code>rerx.validate.check_image_quality</code> on every run &mdash; so a
+      future dim-well problem surfaces without needing to rerun this
+      Cellpose investigation by hand. Cellpose itself is a one-time
+      diagnostic tool, never a production dependency.
+    </p>
+  </section>
+
+  <section>
+    <h2>Per-well object counts</h2>
+    <p class="lede">
+      CellProfiler nuclei count vs. Cellpose's independent reference count,
+      pooled across each well's 4 sites. Dim wells are flagged in red.
+    </p>
+    <div class="card">
+      <div class="plot-title">CellProfiler vs. Cellpose nuclei count, per well</div>
+      <div class="plot-sub">pooled across 4 sites per well</div>
+      <canvas id="wellChart" height="220"></canvas>
+    </div>
+  </section>
+
+  <section>
+    <h2>Full per-well table</h2>
+    <div class="card">
+      <table id="wellTable">
+        <thead>
+          <tr>
+            <th>Well</th><th>Condition</th>
+            <th style="text-align:right">CellProfiler</th>
+            <th style="text-align:right">Cellpose</th>
+            <th style="text-align:right">Abs. % error</th>
+            <th style="text-align:right">Mean pixel IoU</th>
+            <th style="text-align:right">Match rate (IoU&ge;0.5)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Object size, pooled</h2>
+    <p class="lede">
+      CellProfiler's objects run smaller than Cellpose's even on the
+      well-matched sites &mdash; expected, since the two methods draw
+      boundaries differently, not a sign either is wrong on its own. Counts
+      and contrast, not raw size, are what identified the dim-well problem.
+    </p>
+    <div class="grid-2">
+      <div class="card">
+        <div class="plot-title">CellProfiler object area (&mu;m&sup2;)</div>
+        <table>
+          <tbody id="cpAreaRows"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="plot-title">Cellpose object area (&mu;m&sup2;)</div>
+        <table>
+          <tbody id="cpoAreaRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Summary</h2>
+    <div class="card">
+      <p id="summaryText" style="font-size:14px; margin:0;"></p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  ReRx pilot report &middot; HRCE-1 Plate 25 &middot; 24-site Cellpose cross-check &middot; pilot-scale data, not the full RxRx19a dataset
+  <br><br>
+  <strong>Data and sources:</strong>
+  RxRx19a dataset (Recursion, <a href="https://doi.org/10.48550/arXiv.2405.11908">arXiv:2405.11908</a>)
+  &middot; CellProfiler 4.2.8 (<a href="https://cellprofiler.org">cellprofiler.org</a>)
+  &middot; Cellpose (<a href="https://github.com/MouseLand/cellpose">MouseLand/cellpose</a>), used here only as a one-time, threshold-independent reference, never a pipeline dependency
+  &middot; comparison script: <code>scripts/segmentation_cellpose_check.py</code>
+  &middot; full procedure: <code>docs/src/segmentation-config-check.md</code>
+</footer>
+
+<script id="report-data" type="application/json">
+{"n_sites": 24, "pooled": {"cp_n_total": 7039, "cellpose_n_total": 3360, "cp_area_um2": {"mean": 312.67232845574665, "median": 240.82500000000002, "p05": 62.95250000000001, "p95": 819.7767499999994, "min": 48.165000000000006, "max": 1191.45}, "cellpose_area_um2": {"mean": 825.1047767857145, "median": 671.9862500000002, "p05": 156.30387500000003, "p95": 2071.158375, "min": 12.252500000000001, "max": 5583.76}}, "per_well": [{"well": "AA02", "condition": "Active SARS-CoV-2", "dim_well": false, "n_sites": 4, "n_cellprofiler": 581, "n_cellpose": 537, "pct_error": 8.2, "mean_pixel_iou": 0.286, "mean_match_rate_iou50": 0.24}, {"well": "AA08", "condition": "UV Inactivated SARS-CoV-2", "dim_well": true, "n_sites": 4, "n_cellprofiler": 2364, "n_cellpose": 585, "pct_error": 304.1, "mean_pixel_iou": 0.23, "mean_match_rate_iou50": 0.032}, {"well": "AA09", "condition": "Active SARS-CoV-2", "dim_well": false, "n_sites": 4, "n_cellprofiler": 561, "n_cellpose": 520, "pct_error": 7.9, "mean_pixel_iou": 0.306, "mean_match_rate_iou50": 0.246}, {"well": "AA16", "condition": "UV Inactivated SARS-CoV-2", "dim_well": false, "n_sites": 4, "n_cellprofiler": 733, "n_cellpose": 638, "pct_error": 14.9, "mean_pixel_iou": 0.44, "mean_match_rate_iou50": 0.331}, {"well": "E08", "condition": "Mock", "dim_well": true, "n_sites": 4, "n_cellprofiler": 2251, "n_cellpose": 557, "pct_error": 304.1, "mean_pixel_iou": 0.247, "mean_match_rate_iou50": 0.049}, {"well": "E16", "condition": "Mock", "dim_well": false, "n_sites": 4, "n_cellprofiler": 549, "n_cellpose": 523, "pct_error": 5.0, "mean_pixel_iou": 0.47, "mean_match_rate_iou50": 0.499}], "per_site": [{"well": "AA02", "site": 1, "condition": "Active SARS-CoV-2", "n_cellprofiler": 161, "n_cellpose": 150, "pixel_iou_any_overlap": 0.26092856480479737, "n_matched_iou50": 26, "match_rate_cp_side": 0.16149068322981366, "cp_mean_area_um2": 235.28526397515532, "cp_median_area_um2": 216.32000000000002, "cellpose_mean_area_um2": 896.4436000000001, "cellpose_median_area_um2": 732.8262500000001}, {"well": "AA02", "site": 2, "condition": "Active SARS-CoV-2", "n_cellprofiler": 136, "n_cellpose": 125, "pixel_iou_any_overlap": 0.3335484579080233, "n_matched_iou50": 45, "match_rate_cp_side": 0.33088235294117646, "cp_mean_area_um2": 265.0938970588236, "cp_median_area_um2": 247.37375000000003, "cellpose_mean_area_um2": 738.2494600000001, "cellpose_median_area_um2": 641.355}, {"well": "AA02", "site": 3, "condition": "Active SARS-CoV-2", "n_cellprofiler": 144, "n_cellpose": 136, "pixel_iou_any_overlap": 0.213343376792664, "n_matched_iou50": 25, "match_rate_cp_side": 0.1736111111111111, "cp_mean_area_um2": 261.55390625, "cp_median_area_um2": 241.24750000000003, "cellpose_mean_area_um2": 1134.2198897058825, "cellpose_median_area_um2": 911.7550000000001}, {"well": "AA02", "site": 4, "condition": "Active SARS-CoV-2", "n_cellprofiler": 140, "n_cellpose": 126, "pixel_iou_any_overlap": 0.33548590721645205, "n_matched_iou50": 41, "match_rate_cp_side": 0.29285714285714287, "cp_mean_area_um2": 269.6696785714286, "cp_median_area_um2": 255.19000000000003, "cellpose_mean_area_um2": 778.684265873016, "cellpose_median_area_um2": 648.5375}, {"well": "AA09", "site": 1, "condition": "Active SARS-CoV-2", "n_cellprofiler": 141, "n_cellpose": 129, "pixel_iou_any_overlap": 0.29729484944250545, "n_matched_iou50": 31, "match_rate_cp_side": 0.2198581560283688, "cp_mean_area_um2": 306.55221631205677, "cp_median_area_um2": 280.96250000000003, "cellpose_mean_area_um2": 978.480523255814, "cellpose_median_area_um2": 903.3050000000001}, {"well": "AA09", "site": 2, "condition": "Active SARS-CoV-2", "n_cellprofiler": 149, "n_cellpose": 146, "pixel_iou_any_overlap": 0.262104898579969, "n_matched_iou50": 32, "match_rate_cp_side": 0.21476510067114093, "cp_mean_area_um2": 263.725067114094, "cp_median_area_um2": 243.78250000000003, "cellpose_mean_area_um2": 943.5553595890412, "cellpose_median_area_um2": 894.22125}, {"well": "AA09", "site": 3, "condition": "Active SARS-CoV-2", "n_cellprofiler": 140, "n_cellpose": 128, "pixel_iou_any_overlap": 0.252456789881617, "n_matched_iou50": 29, "match_rate_cp_side": 0.20714285714285716, "cp_mean_area_um2": 259.93407142857143, "cp_median_area_um2": 245.05, "cellpose_mean_area_um2": 981.9428125, "cellpose_median_area_um2": 810.9887500000001}, {"well": "AA09", "site": 4, "condition": "Active SARS-CoV-2", "n_cellprofiler": 131, "n_cellpose": 117, "pixel_iou_any_overlap": 0.4124824081892657, "n_matched_iou50": 45, "match_rate_cp_side": 0.3435114503816794, "cp_mean_area_um2": 470.2521755725191, "cp_median_area_um2": 454.18750000000006, "cellpose_mean_area_um2": 1195.0177777777776, "cellpose_median_area_um2": 1018.6475000000002}, {"well": "AA08", "site": 1, "condition": "UV Inactivated SARS-CoV-2", "n_cellprofiler": 660, "n_cellpose": 149, "pixel_iou_any_overlap": 0.1892086791758874, "n_matched_iou50": 8, "match_rate_cp_side": 0.012121212121212121, "cp_mean_area_um2": 262.35585606060613, "cp_median_area_um2": 178.71750000000003, "cellpose_mean_area_um2": 469.8511912751679, "cellpose_median_area_um2": 222.235}, {"well": "AA08", "site": 2, "condition": "UV Inactivated SARS-CoV-2", "n_cellprofiler": 583, "n_cellpose": 148, "pixel_iou_any_overlap": 0.2711720799674644, "n_matched_iou50": 28, "match_rate_cp_side": 0.048027444253859346, "cp_mean_area_um2": 299.25030017152665, "cp_median_area_um2": 194.7725, "cellpose_mean_area_um2": 641.4434966216216, "cellpose_median_area_um2": 271.6675}, {"well": "AA08", "site": 3, "condition": "UV Inactivated SARS-CoV-2", "n_cellprofiler": 609, "n_cellpose": 161, "pixel_iou_any_overlap": 0.20708905304481656, "n_matched_iou50": 17, "match_rate_cp_side": 0.027914614121510674, "cp_mean_area_um2": 296.82463464696224, "cp_median_area_um2": 196.04000000000002, "cellpose_mean_area_um2": 357.0728571428572, "cellpose_median_area_um2": 221.39000000000001}, {"well": "AA08", "site": 4, "condition": "UV Inactivated SARS-CoV-2", "n_cellprofiler": 512, "n_cellpose": 127, "pixel_iou_any_overlap": 0.253195517508484, "n_matched_iou50": 21, "match_rate_cp_side": 0.041015625, "cp_mean_area_um2": 283.38857421875, "cp_median_area_um2": 189.70250000000001, "cellpose_mean_area_um2": 735.9184842519686, "cellpose_median_area_um2": 334.19750000000005}, {"well": "AA16", "site": 1, "condition": "UV Inactivated SARS-CoV-2", "n_cellprofiler": 163, "n_cellpose": 154, "pixel_iou_any_overlap": 0.32977490140321586, "n_matched_iou50": 36, "match_rate_cp_side": 0.22085889570552147, "cp_mean_area_um2": 295.6489110429448, "cp_median_area_um2": 280.1175, "cellpose_mean_area_um2": 923.8538636363636, "cellpose_median_area_um2": 867.815}, {"well": "AA16", "site": 2, "condition": "UV Inactivated SARS-CoV-2", "n_cellprofiler": 197, "n_cellpose": 168, "pixel_iou_any_overlap": 0.52368187636135, "n_matched_iou50": 80, "match_rate_cp_side": 0.40609137055837563, "cp_mean_area_um2": 418.5302157360407, "cp_median_area_um2": 422.50000000000006, "cellpose_mean_area_um2": 874.3838690476192, "cellpose_median_area_um2": 875.2087500000001}, {"well": "AA16", "site": 3, "condition": "UV Inactivated SARS-CoV-2", "n_cellprofiler": 173, "n_cellpose": 160, "pixel_iou_any_overlap": 0.36833998140860613, "n_matched_iou50": 47, "match_rate_cp_side": 0.27167630057803466, "cp_mean_area_um2": 342.13463872832375, "cp_median_area_um2": 338.845, "cellpose_mean_area_um2": 978.8691249999999, "cellpose_median_area_um2": 940.9075}, {"well": "AA16", "site": 4, "condition": "UV Inactivated SARS-CoV-2", "n_cellprofiler": 200, "n_cellpose": 156, "pixel_iou_any_overlap": 0.5397294762938509, "n_matched_iou50": 85, "match_rate_cp_side": 0.425, "cp_mean_area_um2": 453.57698750000003, "cp_median_area_um2": 457.77875000000006, "cellpose_mean_area_um2": 1041.6818750000002, "cellpose_median_area_um2": 939.6400000000001}, {"well": "E08", "site": 1, "condition": "Mock", "n_cellprofiler": 517, "n_cellpose": 132, "pixel_iou_any_overlap": 0.2567670765706156, "n_matched_iou50": 20, "match_rate_cp_side": 0.03868471953578337, "cp_mean_area_um2": 265.7034671179884, "cp_median_area_um2": 172.8025, "cellpose_mean_area_um2": 497.4361363636364, "cellpose_median_area_um2": 240.61375000000004}, {"well": "E08", "site": 2, "condition": "Mock", "n_cellprofiler": 349, "n_cellpose": 144, "pixel_iou_any_overlap": 0.30479922826480166, "n_matched_iou50": 32, "match_rate_cp_side": 0.09169054441260745, "cp_mean_area_um2": 327.4592908309456, "cp_median_area_um2": 247.16250000000002, "cellpose_mean_area_um2": 476.2953993055556, "cellpose_median_area_um2": 244.6275}, {"well": "E08", "site": 3, "condition": "Mock", "n_cellprofiler": 473, "n_cellpose": 120, "pixel_iou_any_overlap": 0.24001982406145458, "n_matched_iou50": 29, "match_rate_cp_side": 0.0613107822410148, "cp_mean_area_um2": 255.2060782241015, "cp_median_area_um2": 153.3675, "cellpose_mean_area_um2": 403.55087499999996, "cellpose_median_area_um2": 229.84000000000003}, {"well": "E08", "site": 4, "condition": "Mock", "n_cellprofiler": 912, "n_cellpose": 161, "pixel_iou_any_overlap": 0.18791225129757785, "n_matched_iou50": 5, "match_rate_cp_side": 0.005482456140350877, "cp_mean_area_um2": 292.35888157894743, "cp_median_area_um2": 198.36375000000004, "cellpose_mean_area_um2": 650.243245341615, "cellpose_median_area_um2": 255.19000000000003}, {"well": "E16", "site": 1, "condition": "Mock", "n_cellprofiler": 150, "n_cellpose": 151, "pixel_iou_any_overlap": 0.45085329291997495, "n_matched_iou50": 78, "match_rate_cp_side": 0.52, "cp_mean_area_um2": 476.94053333333346, "cp_median_area_um2": 473.20000000000005, "cellpose_mean_area_um2": 1004.8365066225166, "cellpose_median_area_um2": 876.2650000000001}, {"well": "E16", "site": 2, "condition": "Mock", "n_cellprofiler": 131, "n_cellpose": 126, "pixel_iou_any_overlap": 0.47291727593534927, "n_matched_iou50": 67, "match_rate_cp_side": 0.5114503816793893, "cp_mean_area_um2": 410.83125954198476, "cp_median_area_um2": 392.08000000000004, "cellpose_mean_area_um2": 839.4840277777778, "cellpose_median_area_um2": 693.53375}, {"well": "E16", "site": 3, "condition": "Mock", "n_cellprofiler": 143, "n_cellpose": 146, "pixel_iou_any_overlap": 0.4629914064626512, "n_matched_iou50": 73, "match_rate_cp_side": 0.5104895104895105, "cp_mean_area_um2": 565.9077272727274, "cp_median_area_um2": 552.2075000000001, "cellpose_mean_area_um2": 1187.7516780821918, "cellpose_median_area_um2": 1104.415}, {"well": "E16", "site": 4, "condition": "Mock", "n_cellprofiler": 125, "n_cellpose": 100, "pixel_iou_any_overlap": 0.4943818387007082, "n_matched_iou50": 57, "match_rate_cp_side": 0.456, "cp_mean_area_um2": 573.84964, "cp_median_area_um2": 553.8975, "cellpose_mean_area_um2": 1212.8369500000001, "cellpose_median_area_um2": 853.45}], "dim_wells": ["AA08", "E08"], "mean_pct_error_dim_wells": 304.1, "mean_pct_error_normal_wells": 9.0, "mean_pct_error_all_wells": 107.4, "compared_method": "Otsu", "adopted_method": "Robust Background"}
+</script>
+
+<script>
+(() => {
+  const dataEl = document.getElementById("report-data");
+  const d = JSON.parse(dataEl.textContent);
+
+  document.getElementById("statSites").textContent = d.n_sites ?? "—";
+  document.getElementById("statCpTotal").textContent = d.pooled?.cp_n_total?.toLocaleString() ?? "—";
+  document.getElementById("statCpoTotal").textContent = d.pooled?.cellpose_n_total?.toLocaleString() ?? "—";
+
+  const dimPct = d.mean_pct_error_dim_wells;
+  const normalPct = d.mean_pct_error_normal_wells;
+  document.getElementById("statDimError").textContent = dimPct != null ? `${dimPct}%` : "—";
+  document.getElementById("statNormalError").textContent = normalPct != null ? `${normalPct}%` : "—";
+
+  const badges = document.getElementById("statusBadges");
+  const badgeDefs = [
+    [`${d.compared_method} thresholding (compared)`, false],
+    [`${d.adopted_method} thresholding (adopted)`, true],
+  ];
+  badgeDefs.forEach(([text, ok]) => {
+    const span = document.createElement("span");
+    span.className = "badge " + (ok ? "ok" : "bad");
+    span.textContent = text;
+    badges.appendChild(span);
+  });
+
+  // Per-well bar chart.
+  const wells = d.per_well || [];
+  new Chart(document.getElementById("wellChart"), {
+    type: "bar",
+    data: {
+      labels: wells.map((w) => `${w.well}${w.dim_well ? " (dim)" : ""}`),
+      datasets: [
+        { label: "CellProfiler", data: wells.map((w) => w.n_cellprofiler), backgroundColor: "#58a6c9" },
+        { label: "Cellpose (reference)", data: wells.map((w) => w.n_cellpose), backgroundColor: "#8494e8" },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: "#9aa3ad" } },
+        tooltip: {
+          callbacks: {
+            afterLabel: (ctx) => {
+              const w = wells[ctx.dataIndex];
+              return `${w.condition} · ${w.pct_error}% abs error`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: "#9aa3ad" }, grid: { color: "#2a2f38" } },
+        y: { ticks: { color: "#9aa3ad" }, grid: { color: "#2a2f38" }, title: { display: true, text: "nuclei (pooled, 4 sites)", color: "#9aa3ad" } },
+      },
+    },
+  });
+
+  // Per-well table.
+  const wellRows = document.getElementById("wellTable").querySelector("tbody");
+  wells.forEach((w) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${w.well}</td>
+      <td>${w.condition}</td>
+      <td class="num">${w.n_cellprofiler.toLocaleString()}</td>
+      <td class="num">${w.n_cellpose.toLocaleString()}</td>
+      <td class="num ${w.dim_well ? "dim" : ""}">${w.pct_error}%</td>
+      <td class="num">${w.mean_pixel_iou}</td>
+      <td class="num">${w.mean_match_rate_iou50}</td>
+    `;
+    wellRows.appendChild(tr);
+  });
+
+  // Area stat tables.
+  function areaRows(stats) {
+    if (!stats) return "";
+    const rows = [
+      ["mean", stats.mean], ["median", stats.median],
+      ["p05", stats.p05], ["p95", stats.p95],
+      ["min", stats.min], ["max", stats.max],
+    ];
+    return rows
+      .map(([label, v]) => `<tr><td>${label}</td><td class="num">${v.toFixed(1)}</td></tr>`)
+      .join("");
+  }
+  document.getElementById("cpAreaRows").innerHTML = areaRows(d.pooled?.cp_area_um2);
+  document.getElementById("cpoAreaRows").innerHTML = areaRows(d.pooled?.cellpose_area_um2);
+
+  // Summary.
+  document.getElementById("summaryText").textContent =
+    `Across ${d.n_sites} sampled sites (6 wells), CellProfiler's ${d.compared_method} thresholding matched ` +
+    `the independent Cellpose reference within ${normalPct}% on the 4 normal-contrast wells, but overshot by ` +
+    `${dimPct}% on the 2 measurably dimmer wells (${(d.dim_wells || []).join(", ")}). This gap, not visible from ` +
+    `object-size checks alone, led the production pipeline to switch nuclei thresholding to ${d.adopted_method} ` +
+    `(see plan.md for the full before/after numbers) and to add MeasureImageQuality-based monitoring so a future ` +
+    `dim-well problem surfaces automatically.`;
+})();
+</script>
+
+</body>
+</html>

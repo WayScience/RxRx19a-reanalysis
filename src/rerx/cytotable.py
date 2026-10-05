@@ -47,15 +47,22 @@ OBJECT_NUMBER_COLUMNS = (
 # over-segmentation problem). Compartments and parent-child logic are
 # otherwise identical to the upstream preset (cytotable.presets.config
 # ["cellprofiler_sqlite"]["CONFIG_JOINS"]).
-RERX_JOINS = """
-    SELECT
+#
+# The Image_ImageQuality_* COLUMNS() selector is only included when the
+# shard's Per_Image table actually has matching columns (see
+# _has_image_quality_columns / _build_joins): DuckDB's COLUMNS() binder
+# raises "No matching columns" if a pattern matches nothing, so a shard
+# from before MeasureImageQuality was added to the pipeline would abort
+# conversion entirely rather than just omitting that metadata.
+_BASE_SELECT_COLUMNS = """
         per_image.Metadata_ImageNumber,
         per_image.Image_Metadata_Experiment,
         per_image.Image_Metadata_Plate,
         per_image.Image_Metadata_Well,
         per_image.Image_Metadata_Site,
-        COLUMNS('Image_FileName_.*'),
-        COLUMNS('Image_ImageQuality_.*'),
+        COLUMNS('Image_FileName_.*'),"""
+
+_JOIN_FROM_CLAUSE = """
         per_cytoplasm.* EXCLUDE (Metadata_ImageNumber),
         per_cells.* EXCLUDE (Metadata_ImageNumber),
         per_nuclei.* EXCLUDE (Metadata_ImageNumber)
@@ -73,6 +80,31 @@ RERX_JOINS = """
         AND per_nuclei.Nuclei_Number_Object_Number
             = per_cytoplasm.Cytoplasm_Parent_Nuclei
 """
+
+
+def _build_joins(include_image_quality: bool) -> str:
+    """Build the CytoTable join SQL, with the Image_ImageQuality_*
+    COLUMNS() selector only when the shard has those columns."""
+    quality_select = (
+        "\n        COLUMNS('Image_ImageQuality_.*')," if include_image_quality else ""
+    )
+    return f"    SELECT{_BASE_SELECT_COLUMNS}{quality_select}\n{_JOIN_FROM_CLAUSE}"
+
+
+def _has_image_quality_columns(sqlite_path: Path) -> bool:
+    """Whether the shard's Per_Image table has any Image_ImageQuality_*
+    columns (added by MeasureImageQuality; absent on older shards)."""
+    import sqlite3
+
+    conn = sqlite3.connect(sqlite_path)
+    try:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(Per_Image)")]
+    finally:
+        conn.close()
+    return any(c.startswith("Image_ImageQuality_") for c in cols)
+
+
+RERX_JOINS = _build_joins(include_image_quality=True)
 
 
 def local_threads_parsl_config() -> "parsl.Config":
@@ -98,7 +130,7 @@ def local_threads_parsl_config() -> "parsl.Config":
 def convert_sqlite_to_parquet(
     sqlite_path: Path,
     dest_path: Path,
-    joins: str = RERX_JOINS,
+    joins: str | None = None,
     parsl_config: "parsl.Config | None" = None,
 ) -> Path:
     """
@@ -122,8 +154,15 @@ def convert_sqlite_to_parquet(
         creates two files with different schemas in one glob (confirmed
         during e2e testing: DuckDB's catalog registration fails with a
         "Column ... was not found in file" error).
-    joins : str
-        DuckDB join SQL passed to CytoTable. Defaults to :data:`RERX_JOINS`.
+    joins : str | None
+        DuckDB join SQL passed to CytoTable. Defaults to ``None``, which
+        inspects ``sqlite_path``'s ``Per_Image`` schema and builds the
+        join with the ``Image_ImageQuality_*`` COLUMNS() selector
+        included only if matching columns exist (see
+        :data:`RERX_JOINS`/:func:`_build_joins`) -- a shard from before
+        ``MeasureImageQuality`` was added has no such columns, and
+        DuckDB's COLUMNS() binder errors on a pattern matching nothing.
+        Pass an explicit value to override this detection.
     parsl_config : object | None
         Parsl config for CytoTable's executor. Defaults to
         :func:`local_threads_parsl_config`.
@@ -145,6 +184,10 @@ def convert_sqlite_to_parquet(
         raise FileNotFoundError(f"missing shard SQLite database: {sqlite_path}")
     dest_path = Path(dest_path)
     dest_path.parent.mkdir(parents=True, exist_ok=True)
+    if joins is None:
+        joins = _build_joins(
+            include_image_quality=_has_image_quality_columns(sqlite_path)
+        )
     cfg = parsl_config if parsl_config is not None else local_threads_parsl_config()
     result = convert(
         source_path=str(sqlite_path),

@@ -152,13 +152,14 @@
     <p class="lede">
       Before normalization, every cell is checked against coSMicQC's default
       nuclei QC thresholds (small/low-formfactor, elongated, and
-      oversized/anomalous nuclei). Flagged cells are dropped before
-      pycytominer normalization and feature selection.
+      oversized/anomalous nuclei). This section shows how many cells were
+      flagged; it does not claim they were removed from this run's
+      feature-selected output.
     </p>
     <div class="grid-2">
       <div class="card stat">
         <div class="value" id="statFlagRate">—</div>
-        <div class="label" id="statFlagRateLabel">cells flagged and dropped</div>
+        <div class="label" id="statFlagRateLabel">cells flagged</div>
       </div>
       <div class="card">
         <div class="plot-title">Flags by threshold set</div>
@@ -303,7 +304,7 @@
   const flagPct = d.cosmicqc_flag_rate != null ? (d.cosmicqc_flag_rate * 100).toFixed(2) + "%" : "—";
   document.getElementById("statFlagRate").textContent = flagPct;
   document.getElementById("statFlagRateLabel").textContent =
-    `${d.cosmicqc_n_flagged_outlier?.toLocaleString() ?? "—"} of ${d.n_raw_cells?.toLocaleString() ?? "—"} cells flagged and dropped`;
+    `${d.cosmicqc_n_flagged_outlier?.toLocaleString() ?? "—"} of ${d.n_raw_cells?.toLocaleString() ?? "—"} cells flagged`;
 
   const cqc = d.cosmicqc_per_threshold_set || {};
   const cqcLabels = Object.keys(cqc).map((k) => k.replace("Metadata_cqc_", "").replace("_is_outlier", ""));

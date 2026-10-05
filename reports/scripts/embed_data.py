@@ -16,6 +16,8 @@ REPORTS = {
     "phenotypic_overview.html": "phenotypic_report_data.json",
     "buscar_reversal.html": "buscar_report_data.json",
     "pipeline_run.html": "pipeline_run_report_data.json",
+    "segmentation_check.html": "segmentation_report_data.json",
+    "decisions.html": "decisions_report_data.json",
 }
 
 PLACEHOLDER = "__DATA__"

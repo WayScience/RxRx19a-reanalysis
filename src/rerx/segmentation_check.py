@@ -163,13 +163,23 @@ def compare_counts(
     ValueError
         If ``reference`` and ``candidate`` don't have the same set of
         site keys (comparing mismatched sites would silently understate
-        error).
+        error), if either is empty, or if any reference count is zero
+        (dividing by it would raise ``ZeroDivisionError`` instead of a
+        clear error).
     """
+    if not reference or not candidate:
+        raise ValueError("reference and candidate must be non-empty")
     if set(reference) != set(candidate):
         raise ValueError(
             "reference and candidate must have the same site keys; "
             f"only in reference: {set(reference) - set(candidate)}, "
             f"only in candidate: {set(candidate) - set(reference)}"
+        )
+    zero_refs = [key for key, count in reference.items() if count == 0]
+    if zero_refs:
+        raise ValueError(
+            f"reference count is zero for site(s) {zero_refs}; "
+            "percent error is undefined against a zero reference"
         )
     per_site = {
         key: abs(candidate[key] - reference[key]) / reference[key] * 100
