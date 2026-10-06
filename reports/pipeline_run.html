@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ReRx Pilot — Pipeline Run Report</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --ink: #e8eaed;
+    --ink-muted: #9aa3ad;
+    --surface: #171a20;
+    --surface-alt: #0d0f13;
+    --border: #2a2f38;
+    --accent: #58a6c9;
+    --mock: #3fb37e;
+    --uv: #e0a63e;
+    --active: #e05b5b;
+    --treated: #8494e8;
+    --good: #3fb37e;
+    --bad: #e05b5b;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--surface-alt);
+    line-height: 1.5;
+  }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 28px max(40px, calc((100% - 1180px) / 2 + 40px)) 22px;
+    text-align: left;
+  }
+  header h1 { margin: 0 0 4px; font-size: 22px; font-weight: 700; }
+  header h1 a { color: inherit; text-decoration: none; }
+  header h1 a:hover { color: var(--accent); }
+  header p.subtitle { margin: 0; color: var(--ink-muted); font-size: 14px; }
+  .badges { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .badge {
+    font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+    background: var(--surface-alt); border: 1px solid var(--border); color: var(--ink-muted);
+  }
+  .badge.ok { background: #12281c; color: var(--good); border-color: #1e4a33; }
+  .badge.bad { background: #2b1414; color: var(--bad); border-color: #4a1e1e; }
+  .badges { justify-content: flex-start; }
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 40px 60px; }
+  section { margin-bottom: 56px; }
+  section h2 {
+    font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--ink-muted); margin: 0 0 14px; font-weight: 700;
+    text-align: left;
+  }
+  section .lede { font-size: 15px; color: var(--ink); max-width: 760px; margin: 0 0 24px; text-align: left; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 24px 28px;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; }
+  @media (max-width: 860px) {
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    header, main { padding-left: 20px; padding-right: 20px; }
+  }
+  .stat { text-align: left; }
+  .stat .value { font-size: 26px; font-weight: 700; }
+  .stat .value.good { color: var(--good); }
+  .stat .value.bad { color: var(--bad); }
+  .stat .label { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+  .plot-title { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+  .plot-sub { font-size: 12px; color: var(--ink-muted); margin-bottom: 10px; }
+  canvas { max-width: 100%; }
+  .note {
+    font-size: 13px; color: var(--ink-muted); background: var(--surface-alt);
+    border-left: 3px solid var(--accent); padding: 12px 16px; border-radius: 4px; margin-top: 18px;
+  }
+  .note + .note { margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--ink-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  td.ok { color: var(--good); }
+  td.bad { color: var(--bad); }
+  footer { text-align: left; font-size: 12px; color: var(--ink-muted); padding: 20px; line-height: 1.9; }
+  footer a { color: var(--accent); }
+  code { background: var(--surface-alt); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><a href="https://github.com/WayScience/RxRx19a-reanalysis">ReRx Pilot — Pipeline Run Report</a></h1>
+  <p class="subtitle" id="headerSubtitle">pilot run &middot; pipeline operational health, not biology</p>
+  <div class="badges" id="statusBadges"></div>
+</header>
+
+<main>
+
+  <section>
+    <h2>What this report shows</h2>
+    <p class="lede">
+      This page describes how the pipeline run itself went: how many cells came
+      through each stage, how long each Slurm stage took, whether the built-in
+      QC checks passed, how many cells coSMicQC flagged as segmentation outliers,
+      and how many cells the CellProfiler/MorphEm fusion step kept. It does not
+      say anything about the biology &mdash; see the phenotypic overview and
+      buscar reversal reports for that.
+    </p>
+    <div class="grid-4">
+      <div class="card stat"><div class="value" id="statRawCells">—</div><div class="label">raw segmented cells</div></div>
+      <div class="card stat"><div class="value" id="statWells">—</div><div class="label">wells</div></div>
+      <div class="card stat"><div class="value" id="statSites">—</div><div class="label">imaged sites</div></div>
+      <div class="card stat"><div class="value" id="statCpFeatures">—</div><div class="label">CellProfiler features (post-selection)</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Slurm stage timing</h2>
+    <p class="lede">
+      Wall-clock minutes per Nextflow/Slurm stage, aggregated across every
+      shard's job in this run. CellProfiler segmentation and MorphEm embedding
+      are the two expensive stages; CyToTable, crop export, and finalize are
+      comparatively cheap.
+    </p>
+    <div class="card">
+      <div class="plot-title">Mean and max minutes per stage</div>
+      <div class="plot-sub" id="timingSub">per shard job, by Nextflow process name</div>
+      <canvas id="timingChart" height="220"></canvas>
+    </div>
+  </section>
+
+  <section>
+    <h2>Validation results</h2>
+    <p class="lede">
+      The run's built-in validation checks (SQLite integrity, schema
+      consistency across shards, crop join + JPEG decode), read from
+      <code>validation_report.txt</code>.
+    </p>
+    <div class="card">
+      <table>
+        <thead><tr><th>Check</th><th>Result</th></tr></thead>
+        <tbody id="validationRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>coSMicQC outlier flagging</h2>
+    <p class="lede">
+      Before normalization, every cell is checked against coSMicQC's default
+      nuclei QC thresholds (small/low-formfactor, elongated, and
+      oversized/anomalous nuclei). This section shows how many cells were
+      flagged; it does not claim they were removed from this run's
+      feature-selected output.
+    </p>
+    <div class="grid-2">
+      <div class="card stat">
+        <div class="value" id="statFlagRate">—</div>
+        <div class="label" id="statFlagRateLabel">cells flagged</div>
+      </div>
+      <div class="card">
+        <div class="plot-title">Flags by threshold set</div>
+        <div class="plot-sub">a cell can trip more than one set</div>
+        <canvas id="cqcChart" height="160"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>CellProfiler / MorphEm fusion</h2>
+    <p class="lede">
+      Fusing CellProfiler and MorphEm feature tables is an inner join on
+      <code>Metadata_cell_id</code>: a cell missing from either side is
+      dropped, not imputed. These counts say how much each side lost.
+    </p>
+    <div class="grid-3">
+      <div class="card stat"><div class="value" id="statFusedCells">—</div><div class="label">cells kept after fusion</div></div>
+      <div class="card stat"><div class="value" id="statCpDropped">—</div><div class="label">CellProfiler-only cells dropped</div></div>
+      <div class="card stat"><div class="value" id="statMeDropped">—</div><div class="label">MorphEm-only cells dropped</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>buscar</h2>
+    <p class="lede">
+      Whether buscar reversal scoring ran for this run, and why not if it
+      didn't &mdash; see <code>rerx.validate.check_control_separation</code>.
+    </p>
+    <div class="card">
+      <p id="buscarStatusText" style="font-size:14px; margin:0;"></p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Summary</h2>
+    <div class="card">
+      <p id="summaryText" style="font-size:14px; margin:0;"></p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  ReRx pipeline run report &middot; generated from run data noted in the subtitle above &middot; pilot-scale data, not the full RxRx19a dataset
+  <br><br>
+  <strong>Data and sources:</strong>
+  RxRx19a dataset (Recursion, <a href="https://doi.org/10.48550/arXiv.2405.11908">arXiv:2405.11908</a>)
+  &middot; coSMicQC (<a href="https://github.com/WayScience/coSMicQC">WayScience/coSMicQC</a>)
+  &middot; CellProfiler 4.2.8 (<a href="https://cellprofiler.org">cellprofiler.org</a>)
+  &middot; MorphEm model (Caicedo Lab, <a href="https://huggingface.co/CaicedoLab/MorphEm">huggingface.co/CaicedoLab/MorphEm</a>)
+  &middot; buscar method: <a href="https://github.com/WayScience/Buscar-benchmark-analysis">WayScience/Buscar-benchmark-analysis</a>
+  &middot; pipeline orchestration: Nextflow + Slurm on CU Research Computing Alpine
+</footer>
+
+<script id="report-data" type="application/json">
+{"run_id": "pilot-x8", "n_raw_cells": 125855, "n_feature_selected_cp_cells": 125855, "n_wells": 176, "n_sites": 704, "n_cp_features_selected": 554, "validation": {"passed": true, "sqlite_shards_checked": 15, "sqlite_shards_failed": 0, "schema_consistent": true, "unique_cell_ids_ok": true, "crops_join_ok": true, "crop_decode_checked": 125855, "crop_decode_failures": 0, "control_separation_skipped": true, "control_separation_median_effect_size": null, "control_separation_passed": true}, "cosmicqc_n_flagged_outlier": 3128, "cosmicqc_flag_rate": 0.0249, "cosmicqc_per_threshold_set": {"Metadata_cqc_small_and_low_formfactor_nuclei_is_outlier": 2889, "Metadata_cqc_elongated_nuclei_is_outlier": 0, "Metadata_cqc_large_nuclei_is_outlier": 239}, "n_feature_selected_morphem_cells": 125855, "n_morphem_features_selected": 1547, "fuse_n_fused_cells": 125855, "fuse_cellprofiler_rows_dropped": 0, "fuse_morphem_rows_dropped": 0, "buscar_skipped_reason": "control separation check was skipped (missing data)", "slurm_stage_timing": {"PREPARE": {"n_jobs": 1, "n_completed": 1, "total_cpu_minutes": 1.4, "mean_minutes": 1.4, "max_minutes": 1.4}, "CELLPROFILER": {"n_jobs": 15, "n_completed": 15, "total_cpu_minutes": 288.9, "mean_minutes": 19.3, "max_minutes": 22.4}, "CYTOTABLE": {"n_jobs": 15, "n_completed": 15, "total_cpu_minutes": 34.7, "mean_minutes": 2.3, "max_minutes": 4.7}, "CROPS": {"n_jobs": 15, "n_completed": 15, "total_cpu_minutes": 6.2, "mean_minutes": 0.4, "max_minutes": 0.7}, "MORPHEM": {"n_jobs": 15, "n_completed": 15, "total_cpu_minutes": 171.7, "mean_minutes": 11.4, "max_minutes": 21.2}, "FINALIZE": {"n_jobs": 1, "n_completed": 1, "total_cpu_minutes": 4.8, "mean_minutes": 4.8, "max_minutes": 4.8}}}
+</script>
+
+<script>
+(() => {
+  const dataEl = document.getElementById("report-data");
+  const d = JSON.parse(dataEl.textContent);
+
+  document.getElementById("headerSubtitle").textContent =
+    `run ${d.run_id} \u00b7 pipeline operational health, not biology`;
+
+  const badges = document.getElementById("statusBadges");
+  const allOk = d.validation && d.validation.passed;
+  const badgeDefs = [
+    [allOk ? "validation passed" : "validation FAILED", allOk],
+    [`${d.cosmicqc_flag_rate != null ? (d.cosmicqc_flag_rate * 100).toFixed(1) : "—"}% cosmicqc flagged`, true],
+  ];
+  badgeDefs.forEach(([text, ok]) => {
+    const span = document.createElement("span");
+    span.className = "badge " + (ok ? "ok" : "bad");
+    span.textContent = text;
+    badges.appendChild(span);
+  });
+
+  document.getElementById("statRawCells").textContent = d.n_raw_cells?.toLocaleString() ?? "—";
+  document.getElementById("statWells").textContent = d.n_wells ?? "—";
+  document.getElementById("statSites").textContent = d.n_sites ?? "—";
+  document.getElementById("statCpFeatures").textContent = d.n_cp_features_selected ?? "—";
+
+  // Stage timing bar chart.
+  const stages = Object.keys(d.slurm_stage_timing || {});
+  const order = ["PREPARE", "CELLPROFILER", "CYTOTABLE", "CROPS", "MORPHEM", "FINALIZE"];
+  stages.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const meanMinutes = stages.map((s) => d.slurm_stage_timing[s].mean_minutes);
+  const maxMinutes = stages.map((s) => d.slurm_stage_timing[s].max_minutes);
+  const nJobs = stages.map((s) => d.slurm_stage_timing[s].n_jobs);
+  document.getElementById("timingSub").textContent =
+    stages.length
+      ? `per shard job, by Nextflow process name (${stages.reduce((a, s) => a + d.slurm_stage_timing[s].n_jobs, 0)} jobs total)`
+      : "no Slurm timing data in this payload";
+
+  if (stages.length) {
+    new Chart(document.getElementById("timingChart"), {
+      type: "bar",
+      data: {
+        labels: stages,
+        datasets: [
+          { label: "mean minutes", data: meanMinutes, backgroundColor: "#58a6c9" },
+          { label: "max minutes", data: maxMinutes, backgroundColor: "#8494e8" },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: "#9aa3ad" } },
+          tooltip: {
+            callbacks: {
+              afterLabel: (ctx) => `${nJobs[ctx.dataIndex]} job(s)`,
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: "#9aa3ad" }, grid: { color: "#2a2f38" } },
+          y: { ticks: { color: "#9aa3ad" }, grid: { color: "#2a2f38" }, title: { display: true, text: "minutes", color: "#9aa3ad" } },
+        },
+      },
+    });
+  }
+
+  // Validation table.
+  const vRows = document.getElementById("validationRows");
+  const v = d.validation || {};
+  const checks = [
+    ["SQLite integrity", v.sqlite_shards_failed === 0, `${v.sqlite_shards_checked ?? 0} shard(s) checked, ${v.sqlite_shards_failed ?? 0} failed`],
+    ["Schema consistency", v.schema_consistent, "across all shards"],
+    ["Unique cell IDs", v.unique_cell_ids_ok, ""],
+    ["Crop join + decode", v.crops_join_ok, `${v.crop_decode_checked ?? 0} cells checked, ${v.crop_decode_failures ?? 0} failures`],
+  ];
+  checks.forEach(([name, ok, detail]) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${name}</td><td class="${ok ? "ok" : "bad"}">${ok ? "pass" : "fail"}${detail ? " — " + detail : ""}</td>`;
+    vRows.appendChild(tr);
+  });
+
+  // cosmicqc.
+  const flagPct = d.cosmicqc_flag_rate != null ? (d.cosmicqc_flag_rate * 100).toFixed(2) + "%" : "—";
+  document.getElementById("statFlagRate").textContent = flagPct;
+  document.getElementById("statFlagRateLabel").textContent =
+    `${d.cosmicqc_n_flagged_outlier?.toLocaleString() ?? "—"} of ${d.n_raw_cells?.toLocaleString() ?? "—"} cells flagged`;
+
+  const cqc = d.cosmicqc_per_threshold_set || {};
+  const cqcLabels = Object.keys(cqc).map((k) => k.replace("Metadata_cqc_", "").replace("_is_outlier", ""));
+  new Chart(document.getElementById("cqcChart"), {
+    type: "bar",
+    data: {
+      labels: cqcLabels,
+      datasets: [{ label: "cells flagged", data: Object.values(cqc), backgroundColor: "#e0a63e" }],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: "#9aa3ad" }, grid: { color: "#2a2f38" } },
+        y: { ticks: { color: "#9aa3ad" }, grid: { color: "#2a2f38" } },
+      },
+    },
+  });
+
+  // Fusion.
+  document.getElementById("statFusedCells").textContent = d.fuse_n_fused_cells?.toLocaleString() ?? "—";
+  document.getElementById("statCpDropped").textContent = d.fuse_cellprofiler_rows_dropped ?? "n/a";
+  document.getElementById("statMeDropped").textContent = d.fuse_morphem_rows_dropped ?? "n/a";
+
+  // buscar.
+  document.getElementById("buscarStatusText").textContent = d.buscar_skipped_reason
+    ? `buscar did not run for this run: ${d.buscar_skipped_reason}.`
+    : "buscar ran for this run; see the buscar reversal report for scores.";
+
+  // Summary.
+  const passText = allOk ? "passed" : "did not all pass";
+  const flagSentence = d.cosmicqc_flag_rate != null
+    ? `coSMicQC flagged ${flagPct} of cells before normalization. `
+    : "";
+  const fuseSentence = d.fuse_n_fused_cells != null
+    ? `Fusion kept ${d.fuse_n_fused_cells.toLocaleString()} of ${d.n_raw_cells?.toLocaleString()} cells (${d.fuse_cellprofiler_rows_dropped ?? 0} CP-only, ${d.fuse_morphem_rows_dropped ?? 0} MorphEm-only dropped). `
+    : "";
+  document.getElementById("summaryText").textContent =
+    `Run ${d.run_id} processed ${d.n_raw_cells?.toLocaleString()} cells across ${d.n_wells} wells ` +
+    `(${d.n_sites} sites). Validation checks ${passText}. ${flagSentence}${fuseSentence}` +
+    (d.buscar_skipped_reason ? `buscar was skipped: ${d.buscar_skipped_reason}.` : "buscar ran for this run.");
+})();
+</script>
+
+</body>
+</html>

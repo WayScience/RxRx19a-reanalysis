@@ -1,0 +1,301 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+---
+cff-version: 1.2.0
+title: RxRx19a reanalysis (ReRx)
+message: >-
+  If you use this software, please cite it using the
+  metadata from the CITATION.cff file.
+type: software
+authors:
+  - given-names: David
+    family-names: Bunten
+    orcid: "https://orcid.org/0000-0001-6041-3665"
+  - given-names: Gregory
+    family-names: Way
+    orcid: "https://orcid.org/0000-0002-0503-9348"
+repository-code: "https://github.com/WayScience/RxRx19a-reanalysis"
+abstract: >-
+  Reanalysis of the RxRx19a high-content imaging dataset: a reproducible
+  pipeline that measures whether treatments move SARS-CoV-2-infected
+  cells toward a healthy appearance using single-cell profiles.
+keywords:
+  - python
+  - cellprofiler
+  - single-cell-analysis
+  - microscopy
+  - profiling
+  - high-content-imaging
+  - sars-cov-2
+license: BSD-3-Clause
+references:
+  - type: article
+    title: >-
+      Identification of potential treatments for COVID-19 through
+      artificial intelligence-enabled phenomic analysis of human cells
+      infected with SARS-CoV-2
+    authors:
+      - family-names: Heiser
+        given-names: Katie
+      - family-names: McLean
+        given-names: Peter F.
+      - family-names: Davis
+        given-names: Chadwick T.
+      - family-names: Fogelson
+        given-names: Ben
+      - family-names: Gordon
+        given-names: Hannah B.
+      - family-names: Jacobson
+        given-names: Pamela
+      - family-names: Hurst
+        given-names: Brett
+      - family-names: Miller
+        given-names: Ben
+      - family-names: Alfa
+        given-names: Ronald W.
+      - family-names: Earnshaw
+        given-names: Berton A.
+      - family-names: Victors
+        given-names: Mason L.
+      - family-names: Chong
+        given-names: Yolanda T.
+      - family-names: Haque
+        given-names: Imran S.
+      - family-names: Low
+        given-names: Adeline S.
+      - family-names: Gibson
+        given-names: Christopher C.
+    doi: 10.1101/2020.04.21.054387
+    year: 2020
+  - type: article
+    title: >-
+      Functional immune mapping with deep-learning enabled phenomics
+      applied to immunomodulatory and COVID-19 drug discovery
+    authors:
+      - family-names: Cuccarese
+        given-names: Michael F.
+      - family-names: Earnshaw
+        given-names: Berton A.
+      - family-names: Heiser
+        given-names: Katie
+      - family-names: Fogelson
+        given-names: Ben
+      - family-names: Davis
+        given-names: Chadwick T.
+      - family-names: McLean
+        given-names: Peter F.
+      - family-names: Gibson
+        given-names: Christopher C.
+    doi: 10.1101/2020.08.02.233064
+    year: 2020
+  - type: data
+    title: "RxRx19a dataset"
+    authors:
+      - name: "Recursion"
+    url: "https://www.rxrx.ai/rxrx19a"
+    notes: >-
+      The image dataset this project reanalyzes, including the published
+      deep-learning site embeddings (RxRx19a-DL-embeddings.zip).
+  - type: article
+    title: "CellProfiler 4: improvements in speed, utility and usability"
+    authors:
+      - family-names: Stirling
+        given-names: David R.
+      - family-names: Swain-Bowden
+        given-names: Madison J.
+      - family-names: Lucas
+        given-names: Alice M.
+      - family-names: Carpenter
+        given-names: Anne E.
+      - family-names: Cimini
+        given-names: Beth A.
+      - family-names: Goodman
+        given-names: Allen
+    doi: 10.1186/s12859-021-04344-9
+    year: 2021
+  - type: article
+    title: "Nextflow enables reproducible computational workflows"
+    authors:
+      - family-names: Di Tommaso
+        given-names: Paolo
+      - family-names: Chatzou
+        given-names: Maria
+      - family-names: Floden
+        given-names: Evan W.
+      - family-names: Prieto Barja
+        given-names: Pablo
+      - family-names: Palumbo
+        given-names: Emilio
+      - family-names: Notredame
+        given-names: Cedric
+    doi: 10.1038/nbt.3820
+    year: 2017
+  - type: article
+    title: >-
+      UMAP: Uniform Manifold Approximation and Projection
+      for Dimension Reduction
+    authors:
+      - family-names: McInnes
+        given-names: Leland
+      - family-names: Healy
+        given-names: John
+      - family-names: Melville
+        given-names: James
+    doi: 10.21105/joss.00861
+    year: 2018
+  - type: software
+    title: "buscar"
+    authors:
+      - family-names: Serrano
+        given-names: Erik
+        orcid: "https://orcid.org/0000-0003-4188-9080"
+      - family-names: Li
+        given-names: Weishan
+        orcid: "https://orcid.org/0009-0001-4643-9372"
+      - family-names: Bunten
+        given-names: Dave
+        orcid: "https://orcid.org/0000-0001-6041-3665"
+      - family-names: Way
+        given-names: Gregory
+        orcid: "https://orcid.org/0000-0002-0503-9348"
+    repository-code: "https://github.com/WayScience/buscar"
+    identifiers:
+      - type: doi
+        value: "10.64898/2026.04.15.718737"
+    license: BSD-3-Clause
+    notes: >-
+      Single-cell hit calling in high-content imaging screens; provides
+      the reversal scoring used in this project.
+  - type: software
+    title: "CytoTable"
+    authors:
+      - family-names: Bunten
+        given-names: David
+        orcid: "https://orcid.org/0000-0001-6041-3665"
+      - family-names: Tomkinson
+        given-names: Jenna
+        orcid: "https://orcid.org/0000-0003-2676-5813"
+      - family-names: Serrano
+        given-names: Erik
+        orcid: "https://orcid.org/0000-0003-4188-9080"
+      - family-names: Lippincott
+        given-names: Michael
+        orcid: "https://orcid.org/0000-0002-8637-1448"
+      - family-names: Brewer
+        given-names: Kenneth
+        orcid: "https://orcid.org/0000-0003-4030-0254"
+      - family-names: Rubinetti
+        given-names: Vincent
+        orcid: "https://orcid.org/0000-0002-4655-3773"
+      - family-names: Alquaddoomi
+        given-names: Faisal
+        orcid: "https://orcid.org/0000-0003-4297-8747"
+      - family-names: Way
+        given-names: Gregory
+        orcid: "https://orcid.org/0000-0002-0503-9348"
+    repository-code: "https://github.com/cytomining/CytoTable"
+    identifiers:
+      - description: Software DOI
+        type: doi
+        value: "10.5281/zenodo.14888111"
+      - description: Manuscript DOI
+        type: doi
+        value: "10.1016/j.patten.2026.101514"
+    license: BSD-3-Clause
+    notes: >-
+      Transforms CellProfiler SQLite output into single-cell profiles
+      in this project.
+  - type: software
+    title: "pycytominer"
+    authors:
+      - name: "Pycytominer Development Team"
+    repository-code: "https://github.com/cytomining/pycytominer"
+    identifiers:
+      - description: CITATION.cff
+        type: url
+        value: "https://github.com/cytomining/pycytominer/blob/main/CITATION.cff"
+    license: BSD-3-Clause
+    notes: >-
+      Provides annotate, normalize, and feature selection used in the
+      finalize stage.
+  - type: software
+    title: "coSMicQC"
+    authors:
+      - family-names: Tomkinson
+        given-names: Jenna
+        orcid: "https://orcid.org/0000-0003-2676-5813"
+      - family-names: Bunten
+        given-names: David
+        orcid: "https://orcid.org/0000-0001-6041-3665"
+      - family-names: Rubinetti
+        given-names: Vincent
+        orcid: "https://orcid.org/0000-0002-4655-3773"
+      - family-names: Way
+        given-names: Gregory
+        orcid: "https://orcid.org/0000-0002-0503-9348"
+    repository-code: "https://github.com/cytomining/coSMicQC"
+    identifiers:
+      - description: Software DOI
+        type: doi
+        value: "10.5281/zenodo.14797008"
+    license: BSD-3-Clause
+  - type: software
+    title: "MorphEm"
+    authors:
+      - family-names: Agrawal
+        given-names: Vidit
+      - family-names: Peters
+        given-names: John
+      - family-names: Caicedo
+        given-names: Juan
+    repository-code: "https://github.com/CaicedoLab/CHAMMI-75"
+    url: "https://huggingface.co/CaicedoLab/MorphEm"
+    license: MIT
+    notes: >-
+      Self-supervised vision transformer (DINO Bag of Channels, trained on
+      CHAMMI-75) used to embed single-cell crops in this project.
+  - type: software
+    title: "agent-skills"
+    authors:
+      - given-names: Addy
+        family-names: Osmani
+    repository-code: "https://github.com/addyosmani/agent-skills"
+    license: MIT
+  - type: software
+    title: "learning-opportunities"
+    authors:
+      - given-names: Dan
+        family-names: Hicks
+    repository-code: "https://github.com/DrCatHicks/learning-opportunities"
+    license: CC-BY-4.0
+  - type: software
+    title: "simple-english"
+    authors:
+      - given-names: Amin
+        family-names: Boulegroun
+    repository-code: "https://github.com/AminBlg/SimpleEnglish"
+    license: MIT
+  - type: data
+    title: "ExampleHuman CellProfiler Data"
+    authors:
+      - name: "CellProfiler Team"
+    repository-code: "https://github.com/CellProfiler/examples"
+    url: "https://cellprofiler.org/examples"
+    scope: "ExampleHuman"
+    license: BSD-3-Clause
+    notes: >-
+      CellProfiler's example human-cell dataset and pipeline; the basis,
+      via the demo-cellprofiler export-to-database example below, for
+      this project's pipelines/rxrx19a.cppipe.
+  - type: software
+    title: "demo-cellprofiler: ExampleHuman export-to-database pipeline"
+    authors:
+      - given-names: David
+        family-names: Bunten
+        orcid: "https://orcid.org/0000-0001-6041-3665"
+    repository-code: "https://github.com/d33bs/demo-cellprofiler"
+    url: "https://github.com/d33bs/demo-cellprofiler/blob/main/src/docker/sqlite_compartment_object_parent_foreign_keys/ExampleHuman_exporttodatabase.cppipe"
+    license: BSD-3-Clause
+    notes: >-
+      Reference pipeline adapted for this project's
+      pipelines/rxrx19a.cppipe.

@@ -1,0 +1,149 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = [ "setuptools>=64", "setuptools-scm>=8" ]
+
+[project]
+name = "rerx"
+description = "Single-cell phenotypic reversal in RxRx19a"
+readme = "README.md"
+authors = [
+  { name = "d33bs" },
+]
+requires-python = ">=3.11"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dynamic = [ "version" ]
+dependencies = [
+  "buscar",
+  "cosmicqc>=1.1.2",
+  "cytodataframe>=0.3.5",
+  "cytotable>=1.2.6",
+  "duckdb>=1.5.5",
+  "fire>=0.7",
+  "jinja2>=3.1.6",
+  "numpy>=1.26",
+  "pandas>=2.2.3",
+  "pillow>=10",
+  "pycytominer>=1.7.1",
+  "requests>=2.32.3",
+]
+scripts.rerx = "rerx.cli:trigger"
+
+[dependency-groups]
+dev = [
+  "coverage[toml]>=7.10.6",
+  "poethepoet>=0.34",
+  "pre-commit>=4",
+  "pytest>=8.3.5",
+  "pytest-cov>=6.2.1",
+  "ty>=0.0.84",
+]
+docs = [
+  "myst-nb>=1.2",
+  "pydata-sphinx-theme>=0.16.1",
+  "sphinx>=8.2.3",
+]
+notebooks = [
+  "black>=25.1",
+  "isort>=6.0.1",
+  "jupyterlab>=4.4.2",
+  "jupyterlab-code-formatter>=3.0.2",
+  "jupytext>=1.17.1",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = [ "src" ]
+include = [ "rerx*" ]
+
+[tool.setuptools_scm]
+root = "."
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
+version_file = "src/rerx/_version.py"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+fix = true
+lint.select = [
+  # flake8-builtins
+  "A",
+  # flake8-annotations
+  "ANN",
+  # flake8-comprehensions
+  "C4",
+  # mccabe
+  "C90",
+  # pycodestyle
+  "E",
+  # pyflakes
+  "F",
+  # isort
+  "I",
+  # pylint
+  "PL",
+  # ruff
+  "RUF",
+  # flake8-simplify
+  "SIM",
+  "W",
+]
+# Ignore `F401` (unused imports) for `__init__.py` file
+lint.per-file-ignores."__init__.py" = [ "F401" ]
+# Tests favor readable literal assertions over named constants, and mock
+# callback signatures don't need full type annotations.
+lint.per-file-ignores."tests/*.py" = [ "ANN001", "ANN202", "PLR2004" ]
+
+[tool.pytest.ini_options]
+pythonpath = [ "." ]
+addopts = [
+  "--cov=rerx",
+  "--cov-report=term-missing",
+  "--cov-report=xml",
+  "-m",
+  "not pilot_e2e",
+]
+markers = [
+  "pilot_e2e: full local pilot pipeline against a real CellProfiler container (needs Docker; run explicitly with `-m pilot_e2e`)",
+]
+
+[tool.coverage.run]
+branch = true
+source = [ "src/rerx" ]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.poe.tasks]
+# tasks for development environments
+test.shell = """
+pytest
+"""
+lint.shell = """
+pre-commit run --all-files
+"""
+pipeline.shell = """
+pre-commit run --all-files && pytest
+"""
+jupyter.shell = """
+jupyter lab
+"""
+
+[tool.jupytext]
+formats = "ipynb,py:light"
+
+[tool.vulture]
+min_confidence = 90
+paths = [ "src/rerx", "tests", ".vulture_whitelist.py" ]
+
+[tool.uv.sources]
+buscar = { git = "https://github.com/WayScience/buscar.git" }

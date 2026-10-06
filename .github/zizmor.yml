@@ -1,0 +1,7 @@
+# Zizmor checks GitHub Actions workflows for security issues.
+# Allow actions pinned to a tag or branch instead of requiring a commit hash.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": ref-pin

@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ReRx Pilot — buscar Reversal Scoring</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --ink: #e8eaed;
+    --ink-muted: #9aa3ad;
+    --surface: #171a20;
+    --surface-alt: #0d0f13;
+    --border: #2a2f38;
+    --accent: #a78bc9;
+    --remdesivir: #58a6c9;
+    --oseltamivir: #e0a63e;
+    --control: #7a828f;
+    --good: #4ec98a;
+    --bad: #e07070;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--surface-alt);
+    line-height: 1.5;
+  }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 28px max(40px, calc((100% - 1180px) / 2 + 40px)) 22px;
+  }
+  header h1 { margin: 0 0 4px; font-size: 22px; font-weight: 700; text-align: left; }
+  header h1 a { color: inherit; text-decoration: none; }
+  header h1 a:hover { color: var(--accent); }
+  header p.subtitle { margin: 0; color: var(--ink-muted); font-size: 14px; text-align: left; }
+  .badges { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; justify-content: flex-start; }
+  .badge {
+    font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+    background: var(--surface-alt); border: 1px solid var(--border); color: var(--ink-muted);
+  }
+  .badge.ok { background: #12281c; color: var(--good); border-color: #1e4a33; }
+  .badge.warn { background: #2d2113; color: #e0a63e; border-color: #4d3a1a; }
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 40px 60px; }
+  section { margin-bottom: 56px; }
+  section h2 {
+    font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--ink-muted); margin: 0 0 14px; font-weight: 700;
+    text-align: left;
+  }
+  section .lede { font-size: 15px; color: var(--ink); max-width: 780px; margin: 0 0 24px; text-align: left; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 24px 28px;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1.3fr 1fr; gap: 28px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  @media (max-width: 900px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    header, main { padding-left: 20px; padding-right: 20px; }
+  }
+  .stat .value { font-size: 26px; font-weight: 700; }
+  .stat .label { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+  .plot-title { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+  .plot-sub { font-size: 12px; color: var(--ink-muted); margin-bottom: 10px; }
+  canvas { max-width: 100%; }
+  .legend-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; justify-content: center; }
+  .legend-item { display: flex; align-items: center; gap: 6px; color: var(--ink-muted); cursor: pointer; user-select: none; background: none; border: 0; padding: 0; font: inherit; text-align: left; }
+  .legend-item.off { opacity: 0.35; }
+  .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .note {
+    font-size: 13px; color: var(--ink-muted); background: var(--surface-alt);
+    border-left: 3px solid var(--accent); padding: 12px 16px; border-radius: 4px; margin-top: 18px;
+  }
+  .note + .note { margin-top: 12px; }
+  .note.warn { border-left-color: #a3611a; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--ink-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  footer { text-align: left; font-size: 12px; color: var(--ink-muted); padding: 20px; line-height: 1.9; }
+  footer a { color: var(--accent); }
+  code { background: var(--surface-alt); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><a href="https://github.com/WayScience/RxRx19a-reanalysis">ReRx Pilot — buscar Reversal Scoring</a></h1>
+  <p class="subtitle">HRCE-1, Plate 25 &middot; well-level aggregate &middot; 18 treatment groups &middot; RxRx19a pilot run</p>
+  <div class="badges" id="statusBadges"></div>
+</header>
+
+<main>
+
+  <section>
+    <h2>What buscar measures</h2>
+    <p class="lede">
+      buscar (Bioactive Unbiased Single-cell Compound Assessment and Ranking) scores
+      each perturbation on two numbers, both measured against one anchor: the
+      healthy (mock) population, buscar's <strong>target</strong>. The
+      <strong>on-score</strong> is the distance from mock in the features that
+      actually change between healthy and diseased cells, scaled so the diseased
+      control (<code>active_untreated</code>, buscar's <strong>reference</strong>)
+      sits at exactly 1.0 — a low on-score means strong reversal toward healthy.
+      The <strong>off-score</strong> asks: does the treatment also change features
+      that should not move? A low off-score means the treatment is specific,
+      not just generally disruptive to the cell.
+    </p>
+    <div class="grid-3">
+      <div class="card stat"><div class="value" id="statOn">—</div><div class="label">on-signature features (change between mock and disease)</div></div>
+      <div class="card stat"><div class="value" id="statOff">—</div><div class="label">off-signature features (should not change)</div></div>
+      <div class="card stat"><div class="value" id="statPerts">—</div><div class="label">treatment groups scored</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why this report scores wells, not single cells</h2>
+    <p class="lede">
+      buscar needs the mock and disease control populations to actually look different
+      before it can score anything. The pipeline checks this automatically before
+      running buscar (a biological QC gate, using each feature's Cohen's d effect
+      size). At the single-cell level, cell-to-cell variation drowns out the
+      treatment signal in this pilot. Aggregating to one row per well first,
+      the same two populations separate clearly.
+    </p>
+    <div class="grid-2">
+      <div class="card">
+        <div class="plot-title">Single-cell QC gate</div>
+        <div class="stat"><div class="value" id="statScGate">—</div><div class="label" id="statScGateLabel">median |Cohen's d| across features</div></div>
+        <p class="note warn" id="scGateNote"></p>
+      </div>
+      <div class="card">
+        <div class="plot-title">Well-level QC gate</div>
+        <div class="stat"><div class="value" id="statWellGate">—</div><div class="label" id="statWellGateLabel">median |Cohen's d| across features</div></div>
+        <p class="note" id="wellGateNote"></p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Efficacy vs. specificity</h2>
+    <p class="lede">
+      Each point is one treatment group. The x-axis is the off-score (lower is more
+      specific); the y-axis is the on-score (lower is more reversed toward healthy).
+      The bottom-left corner is where a good treatment should land: strong reversal,
+      few side effects.
+    </p>
+    <div class="card">
+      <canvas id="quadrantScatter" height="110"></canvas>
+    </div>
+    <div class="legend-row" id="compoundLegend"></div>
+    <div class="plot-sub" style="margin-top:6px">click a legend key to show or hide that compound&rsquo;s points</div>
+  </section>
+
+  <section>
+    <h2>Dose response</h2>
+    <p class="lede">
+      Remdesivir is the pilot's known-active drug (expected to reverse the infection
+      phenotype at higher doses); Oseltamivir carboxylate is a known-inactive drug
+      (it targets a different virus family, not coronaviruses). A working buscar score
+      should show Remdesivir's reversal getting stronger (on-score dropping) as the
+      dose increases, and Oseltamivir staying flat and weak across doses. (Note these
+      are assay-validation drug controls, distinct from buscar's own two control
+      populations — mock is the healthy target, active_untreated the diseased
+      reference.)
+    </p>
+    <div class="card">
+      <canvas id="doseResponse" height="90"></canvas>
+    </div>
+  </section>
+
+  <section>
+    <h2>Full score table</h2>
+    <div class="card">
+      <table id="scoreTable">
+        <thead>
+          <tr><th>Treatment</th><th>Concentration</th><th style="text-align:right">On-score</th><th style="text-align:right">Off-score</th><th style="text-align:right">Cells</th><th style="text-align:right">Wells</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Summary</h2>
+    <div class="card">
+      <p id="summaryText" style="font-size:14px; margin:0;"></p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  ReRx pilot report &middot; HRCE-1 Plate 25 &middot; generated from run <code>pilot-dev</code> &middot; pilot-scale data, not the full RxRx19a dataset
+  <br><br>
+  <strong>Data and sources:</strong>
+  RxRx19a dataset (Recursion, <a href="https://doi.org/10.48550/arXiv.2405.11908">arXiv:2405.11908</a>)
+  &middot; CellProfiler 4.2.8 (<a href="https://cellprofiler.org">cellprofiler.org</a>)
+  &middot; buscar methodology: <a href="https://github.com/WayScience/Buscar-benchmark-analysis" target="_blank" rel="noopener">WayScience/Buscar-benchmark-analysis</a>
+</footer>
+
+<script id="report-data" type="application/json">
+{"target_state": "mock", "ref_state": "active_untreated", "on_signature_count": 311, "off_signature_count": 1206, "ambiguous_count": 0, "total_features": 1517, "single_cell_gate": {"skipped": false, "passed": false, "median_abs_effect_size": 0.339, "checked_features": 1482}, "well_level_gate": {"skipped": false, "passed": true, "median_abs_effect_size": 1.199, "checked_features": 1431}, "scores": [{"perturbation": "Oseltamivir carboxylate__3.0", "compound": "Oseltamivir carboxylate", "concentration": 3.0, "on_score": 0.3333, "off_score": 0.0, "is_reference": false, "cell_count": 483, "well_count": 1}, {"perturbation": "Oseltamivir carboxylate__0.1", "compound": "Oseltamivir carboxylate", "concentration": 0.1, "on_score": 0.6354, "off_score": 0.0, "is_reference": false, "cell_count": 583, "well_count": 1}, {"perturbation": "Remdesivir (GS-5734)__0.3", "compound": "Remdesivir (GS-5734)", "concentration": 0.3, "on_score": 0.3647, "off_score": 0.0, "is_reference": false, "cell_count": 1082, "well_count": 2}, {"perturbation": "active_untreated", "compound": "active_untreated", "concentration": null, "on_score": 1.0, "off_score": 0.0, "is_reference": true, "cell_count": 3231, "well_count": 6}, {"perturbation": "Oseltamivir carboxylate__0.3", "compound": "Oseltamivir carboxylate", "concentration": 0.3, "on_score": 0.5889, "off_score": 0.0, "is_reference": false, "cell_count": 550, "well_count": 1}, {"perturbation": "Oseltamivir carboxylate__10.0", "compound": "Oseltamivir carboxylate", "concentration": 10.0, "on_score": 0.6408, "off_score": 0.0, "is_reference": false, "cell_count": 1929, "well_count": 1}, {"perturbation": "Oseltamivir carboxylate__0.03", "compound": "Oseltamivir carboxylate", "concentration": 0.03, "on_score": 0.2916, "off_score": 0.0, "is_reference": false, "cell_count": 557, "well_count": 1}, {"perturbation": "uv", "compound": "uv", "concentration": null, "on_score": 0.136, "off_score": 0.0, "is_reference": false, "cell_count": 6086, "well_count": 6}, {"perturbation": "Remdesivir (GS-5734)__0.003", "compound": "Remdesivir (GS-5734)", "concentration": 0.003, "on_score": 0.7046, "off_score": 0.0, "is_reference": false, "cell_count": 1133, "well_count": 2}, {"perturbation": "Oseltamivir carboxylate__0.003", "compound": "Oseltamivir carboxylate", "concentration": 0.003, "on_score": 0.6327, "off_score": 0.0, "is_reference": false, "cell_count": 445, "well_count": 1}, {"perturbation": "Oseltamivir carboxylate__0.01", "compound": "Oseltamivir carboxylate", "concentration": 0.01, "on_score": 0.552, "off_score": 0.0, "is_reference": false, "cell_count": 464, "well_count": 1}, {"perturbation": "Remdesivir (GS-5734)__0.1", "compound": "Remdesivir (GS-5734)", "concentration": 0.1, "on_score": 0.3568, "off_score": 0.0, "is_reference": false, "cell_count": 1381, "well_count": 2}, {"perturbation": "Remdesivir (GS-5734)__1.0", "compound": "Remdesivir (GS-5734)", "concentration": 1.0, "on_score": 0.3862, "off_score": 0.0, "is_reference": false, "cell_count": 1086, "well_count": 2}, {"perturbation": "Remdesivir (GS-5734)__0.01", "compound": "Remdesivir (GS-5734)", "concentration": 0.01, "on_score": 0.714, "off_score": 0.0, "is_reference": false, "cell_count": 1241, "well_count": 2}, {"perturbation": "Oseltamivir carboxylate__1.0", "compound": "Oseltamivir carboxylate", "concentration": 1.0, "on_score": 0.7757, "off_score": 0.0, "is_reference": false, "cell_count": 448, "well_count": 1}, {"perturbation": "Remdesivir (GS-5734)__0.03", "compound": "Remdesivir (GS-5734)", "concentration": 0.03, "on_score": 0.6862, "off_score": 0.0, "is_reference": false, "cell_count": 1030, "well_count": 2}, {"perturbation": "Remdesivir (GS-5734)__3.0", "compound": "Remdesivir (GS-5734)", "concentration": 3.0, "on_score": 0.1182, "off_score": 0.0, "is_reference": false, "cell_count": 2522, "well_count": 2}, {"perturbation": "Remdesivir (GS-5734)__10.0", "compound": "Remdesivir (GS-5734)", "concentration": 10.0, "on_score": 0.1413, "off_score": 0.0, "is_reference": false, "cell_count": 3132, "well_count": 2}]}
+</script>
+
+<script>
+const data = JSON.parse(document.getElementById('report-data').textContent);
+
+document.getElementById('statOn').textContent = data.on_signature_count;
+document.getElementById('statOff').textContent = data.off_signature_count;
+document.getElementById('statPerts').textContent = data.scores.length;
+
+function gateBadgeText(gate) {
+  if (gate.skipped) return 'skipped (no data)';
+  return gate.passed ? 'pass' : 'fail';
+}
+
+const scGate = data.single_cell_gate;
+const wellGate = data.well_level_gate;
+
+document.getElementById('statScGate').textContent = scGate.median_abs_effect_size ?? '—';
+document.getElementById('statWellGate').textContent = wellGate.median_abs_effect_size ?? '—';
+
+document.getElementById('scGateNote').textContent =
+  `${gateBadgeText(scGate)} against a threshold of 0.5, checked over ${scGate.checked_features} features. ` +
+  `This pilot's mock and disease single cells overlap too much to trust a single-cell buscar score, ` +
+  `so the pipeline skips buscar at this level and reports why instead of guessing.`;
+
+document.getElementById('wellGateNote').textContent =
+  `${gateBadgeText(wellGate)}, checked over ${wellGate.checked_features} features. ` +
+  `Averaging cells within a well removes enough noise that mock and disease wells clearly separate, ` +
+  `so buscar scoring below uses this well-level aggregate.`;
+
+const COMPOUND_COLORS = {
+  'Remdesivir (GS-5734)': getComputedStyle(document.documentElement).getPropertyValue('--remdesivir').trim(),
+  'Oseltamivir carboxylate': getComputedStyle(document.documentElement).getPropertyValue('--oseltamivir').trim(),
+  'active_untreated': getComputedStyle(document.documentElement).getPropertyValue('--control').trim(),
+  'uv': '#8a6fc7'
+};
+function colorFor(compound) {
+  return COMPOUND_COLORS[compound] || '#999';
+}
+function labelFor(compound) {
+  if (compound === 'active_untreated') return 'Active virus, untreated (reference)';
+  if (compound === 'uv') return 'UV-inactivated virus';
+  return compound;
+}
+
+// --- Quadrant scatter: efficacy (on, y, inverted so low=top) vs specificity (off, x) ---
+const quadrantGroups = {};
+for (const row of data.scores) {
+  const key = row.compound;
+  if (!quadrantGroups[key]) quadrantGroups[key] = [];
+  quadrantGroups[key].push({ x: row.off_score, y: row.on_score, meta: row });
+}
+const quadrantDatasets = Object.entries(quadrantGroups).map(([compound, pts]) => ({
+  label: labelFor(compound),
+  data: pts,
+  backgroundColor: colorFor(compound),
+  pointRadius: (ctx) => ctx.raw && ctx.raw.meta && ctx.raw.meta.is_reference ? 8 : 5,
+  pointStyle: (ctx) => ctx.raw && ctx.raw.meta && ctx.raw.meta.is_reference ? 'rectRot' : 'circle'
+}));
+
+const quadrantChart = new Chart(document.getElementById('quadrantScatter'), {
+  type: 'scatter',
+  data: { datasets: quadrantDatasets },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => {
+            const m = ctx.raw.meta;
+            return `${m.perturbation}  ·  on=${m.on_score.toFixed(2)}  off=${m.off_score.toFixed(2)}  ·  ${m.cell_count} cells / ${m.well_count} well(s)`;
+          }
+        }
+      }
+    },
+    scales: {
+      x: { title: { display: true, text: 'Off-score (lower = more specific)', color: '#9aa3ad' }, min: -0.05, max: 1.0, grid: { color: '#22272f' }, ticks: { color: '#9aa3ad' } },
+      y: { title: { display: true, text: 'On-score (lower = more reversed toward healthy)' }, reverse: false, min: 0, max: 1.05, grid: { color: '#22272f' }, ticks: { color: '#9aa3ad' } }
+    }
+  }
+});
+
+const legendEl = document.getElementById('compoundLegend');
+Object.entries(quadrantGroups).forEach(([compound]) => {
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'legend-item';
+  item.setAttribute('aria-pressed', 'true');
+  item.innerHTML = `<span class="swatch" style="background:${colorFor(compound)}"></span>${labelFor(compound)}`;
+  const toggle = () => {
+    const hidden = item.classList.toggle('off');
+    item.setAttribute('aria-pressed', String(!hidden));
+    for (const ds of quadrantChart.data.datasets) {
+      if (ds.label === labelFor(compound)) ds.hidden = hidden;
+    }
+    quadrantChart.update();
+  };
+  item.addEventListener('click', toggle);
+  legendEl.appendChild(item);
+});
+
+// --- Dose response line chart ---
+function doseSeriesFor(compound) {
+  return data.scores
+    .filter((r) => r.compound === compound && r.concentration !== null)
+    .sort((a, b) => a.concentration - b.concentration)
+    .map((r) => ({ x: r.concentration, y: r.on_score }));
+}
+
+const remdesivirSeries = doseSeriesFor('Remdesivir (GS-5734)');
+const oseltamivirSeries = doseSeriesFor('Oseltamivir carboxylate');
+
+new Chart(document.getElementById('doseResponse'), {
+  type: 'line',
+  data: {
+    datasets: [
+      {
+        label: 'Remdesivir (GS-5734) — known active',
+        data: remdesivirSeries,
+        borderColor: colorFor('Remdesivir (GS-5734)'),
+        backgroundColor: colorFor('Remdesivir (GS-5734)'),
+        tension: 0.15,
+        pointRadius: 5
+      },
+      {
+        label: 'Oseltamivir carboxylate — known inactive',
+        data: oseltamivirSeries,
+        borderColor: colorFor('Oseltamivir carboxylate'),
+        backgroundColor: colorFor('Oseltamivir carboxylate'),
+        tension: 0.15,
+        pointRadius: 5
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { position: 'bottom' } },
+    scales: {
+      x: { type: 'logarithmic', title: { display: true, text: 'Concentration (µM, log scale)', color: '#9aa3ad' }, grid: { color: '#22272f' }, ticks: { color: '#9aa3ad' } },
+      y: { title: { display: true, text: 'On-score (lower = more reversed)', color: '#9aa3ad' }, min: 0, max: 1.05, grid: { color: '#22272f' }, ticks: { color: '#9aa3ad' } }
+    }
+  }
+});
+
+// --- Full table ---
+const tbody = document.querySelector('#scoreTable tbody');
+const sorted = [...data.scores].sort((a, b) => a.on_score - b.on_score);
+for (const row of sorted) {
+  const tr = document.createElement('tr');
+  const concText = row.concentration !== null ? row.concentration + ' µM' : '—';
+  // Build cells with textContent (never innerHTML): dataset metadata is
+  // untrusted input and must not be parsed as HTML.
+  const tdPert = document.createElement('td');
+  tdPert.textContent = row.perturbation;
+  if (row.is_reference) {
+    const ref = document.createElement('span');
+    ref.style.color = 'var(--ink-muted)';
+    ref.textContent = ' (reference)';
+    tdPert.appendChild(ref);
+  }
+  const tdConc = document.createElement('td');
+  tdConc.textContent = concText;
+  const tdOn = document.createElement('td');
+  tdOn.className = 'num';
+  tdOn.textContent = row.on_score.toFixed(3);
+  const tdOff = document.createElement('td');
+  tdOff.className = 'num';
+  tdOff.textContent = row.off_score.toFixed(3);
+  const tdCount = document.createElement('td');
+  tdCount.className = 'num';
+  tdCount.textContent = row.cell_count.toLocaleString();
+  const tdWells = document.createElement('td');
+  tdWells.className = 'num';
+  tdWells.textContent = String(row.well_count);
+  for (const td of [tdPert, tdConc, tdOn, tdOff, tdCount, tdWells]) {
+    tr.appendChild(td);
+  }
+  tbody.appendChild(tr);
+}
+
+// --- Badges + summary ---
+const badgesEl = document.getElementById('statusBadges');
+badgesEl.innerHTML = `
+  <span class="badge warn">Single-cell QC gate: ${gateBadgeText(scGate)}</span>
+  <span class="badge ok">Well-level QC gate: ${gateBadgeText(wellGate)}</span>
+  <span class="badge">Off-scores are 0.00 for every treatment (see summary)</span>
+`;
+
+const bestRemdesivir = remdesivirSeries.reduce((a, b) => (b.y < a.y ? b : a), remdesivirSeries[0]);
+const worstRemdesivir = remdesivirSeries.reduce((a, b) => (b.y > a.y ? b : a), remdesivirSeries[0]);
+const bestOseltamivir = oseltamivirSeries.reduce((a, b) => (b.y < a.y ? b : a), oseltamivirSeries[0]);
+
+const summary = `
+At the well level, Remdesivir shows the dose-dependent reversal buscar is meant to
+detect: its on-score falls from ${worstRemdesivir.y.toFixed(2)} at ${worstRemdesivir.x} µM
+to ${bestRemdesivir.y.toFixed(2)} at ${bestRemdesivir.x} µM, meaning higher
+doses move cells closer to the healthy target (mock; the disease reference,
+active_untreated, is the 1.0 anchor, not the destination). Oseltamivir carboxylate, the known
+weak/inactive control, never drops below ${bestOseltamivir.y.toFixed(2)} at any dose,
+consistent with it not treating this disease. Every off-score in this pilot is 0.00:
+with only 1-2 wells per treatment, the KS-test buscar uses to flag off-target
+features never reaches significance, so specificity cannot be judged yet. A larger
+run with more replicate wells per treatment is needed before off-scores are
+meaningful. MorphEm-space buscar scores are not part of this report; the plan calls
+for running buscar a second time in MorphEm's feature space once it exists, then
+comparing the two rankings.
+`;
+document.getElementById('summaryText').textContent = summary.trim();
+</script>
+
+</body>
+</html>

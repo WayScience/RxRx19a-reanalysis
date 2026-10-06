@@ -1,0 +1,37 @@
+---
+# used for publishing packages to pypi on release
+name: publish pypi release
+
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  publish_pypi:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch tags
+        run: git fetch --all --tags
+      - name: Python setup
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+      - name: uv build distribution content
+        run: uv build
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.14.2

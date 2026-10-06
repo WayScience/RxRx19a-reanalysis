@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ReRx Pilot — Pipeline Decisions</title>
+<style>
+  :root {
+    --ink: #e8eaed;
+    --ink-muted: #9aa3ad;
+    --surface: #171a20;
+    --surface-alt: #0d0f13;
+    --border: #2a2f38;
+    --accent: #8494e8;
+    --good: #3fb37e;
+    --bad: #e05b5b;
+    --pending: #e0a63e;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--surface-alt);
+    line-height: 1.5;
+  }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 28px max(40px, calc((100% - 1180px) / 2 + 40px)) 22px;
+    text-align: left;
+  }
+  header h1 { margin: 0 0 4px; font-size: 22px; font-weight: 700; }
+  header h1 a { color: inherit; text-decoration: none; }
+  header h1 a:hover { color: var(--accent); }
+  header p.subtitle { margin: 0; color: var(--ink-muted); font-size: 14px; }
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 40px 60px; }
+  section { margin-bottom: 40px; }
+  section h2 {
+    font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--ink-muted); margin: 0 0 14px; font-weight: 700;
+    text-align: left;
+  }
+  section .lede { font-size: 15px; color: var(--ink); max-width: 760px; margin: 0 0 24px; text-align: left; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 24px 28px;
+  }
+  @media (max-width: 860px) {
+    header, main { padding-left: 20px; padding-right: 20px; }
+  }
+  .decision-card { margin-bottom: 20px; }
+  .decision-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .decision-component { font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--ink-muted); }
+  .decision-question { font-size: 16px; font-weight: 700; margin: 4px 0 14px; }
+  .status-badge {
+    font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; white-space: nowrap;
+  }
+  .status-badge.decided { background: #12281c; color: var(--good); border: 1px solid #1e4a33; }
+  .status-badge.pending { background: #2d2113; color: var(--pending); border: 1px solid #4d3a1a; }
+  .options { display: flex; flex-direction: column; gap: 10px; }
+  .option {
+    border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px;
+    background: var(--surface-alt);
+  }
+  .option.chosen { border-color: #1e4a33; background: #0f1a14; }
+  .option-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 700; }
+  .option.chosen .option-head::before { content: "\2713"; color: var(--good); }
+  .option.chosen .option-head { color: var(--good); }
+  .option-outcome { font-size: 13px; color: var(--ink-muted); margin-top: 4px; }
+  .evidence { font-size: 12px; color: var(--ink-muted); margin-top: 12px; }
+  .evidence code { background: var(--surface-alt); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+  footer { text-align: left; font-size: 12px; color: var(--ink-muted); padding: 20px; line-height: 1.9; }
+  footer a { color: var(--accent); }
+  code { background: var(--surface-alt); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><a href="https://github.com/WayScience/RxRx19a-reanalysis">ReRx Pilot — Pipeline Decisions</a></h1>
+  <p class="subtitle">why each pipeline component is configured the way it is, with the options actually tried</p>
+</header>
+
+<main>
+
+  <section>
+    <h2>What this report shows</h2>
+    <p class="lede">
+      Pilot work surfaced several concrete choices about how to configure
+      non-biology pipeline components &mdash; thresholding methods, QC scope,
+      scoring granularity, crop encoding, run size. Each card below lists the
+      options actually tried for one decision, what happened with each, and
+      which one the pipeline uses today. "Pending" means the current default
+      is in use but the validation plan.md calls for has not been run yet.
+      Full write-ups live in <code>plan.md</code>; the segmentation-threshold
+      decision also has its own chart report, <code>segmentation_check.html</code>.
+    </p>
+  </section>
+
+  <section id="decisionsSection"></section>
+
+</main>
+
+<footer>
+  ReRx pilot report &middot; curated from plan.md's per-stage investigation notes &middot; pilot-scale findings, not the full RxRx19a dataset
+  <br><br>
+  <strong>Data and sources:</strong>
+  plan.md (this repository's design and investigation log)
+  &middot; <a href="segmentation_check.html">segmentation_check.html</a> (segmentation threshold decision, charted)
+  &middot; <a href="pipeline_run.html">pipeline_run.html</a> &middot; <a href="buscar_reversal.html">buscar_reversal.html</a>
+</footer>
+
+<script id="report-data" type="application/json">
+{"decisions": [{"id": "segmentation_threshold", "component": "CellProfiler nuclei segmentation", "question": "Which thresholding method for IdentifyPrimaryObjects's nuclei detection?", "status": "decided", "options": [{"name": "Otsu (CellProfiler default)", "outcome": "Baseline. Over-segmented 2 of 6 sampled wells 3-7x vs. an independent Cellpose reference (mean abs. count error 107% pooled across 24 sites).", "chosen": false}, {"name": "Threshold strategy: Adaptive (same Otsu, computed per-window)", "outcome": "Made it worse -- total object count rose to 8,293 from the baseline's 7,039.", "chosen": false}, {"name": "Threshold correction factor: 1.3", "outcome": "Partial improvement (total 5,203) but the two dim wells still ran 2-3x over Cellpose's counts.", "chosen": false}, {"name": "Thresholding method: Minimum Cross-Entropy (precedent: WayScience pediatric_cancer_atlas_profiling)", "outcome": "Better than Otsu (29.8% pooled mean abs. error) but worse than Robust Background (13.3%); visual mask overlays showed messier splits than Robust Background on the same dim well.", "chosen": false}, {"name": "Thresholding method: Robust Background", "outcome": "Fixed it: mean abs. count error vs. Cellpose dropped from 107% to 13% on Plate 25's 24-site sample, without under-segmenting the already-fine wells. Re-validated on Plates 1 and 13 (48 more sites): mean error 5.0% vs. Otsu's 7.3%. A later visual side-by-side (all variants on the same six sites, scripts/segmentation_cytodataframe_compare.py) confirmed its mask boundaries hug the nuclei on the dim wells where the others fragment or over-split.", "chosen": true}], "evidence": "plan.md section 12 (segmentation review); reports/segmentation_check.html; src/rerx/segmentation_check.py"}, {"id": "image_quality_monitoring_scope", "component": "MeasureImageQuality module scope", "question": "Which image channels should the embedded MeasureImageQuality QC module run on, so a future dim-well problem surfaces automatically?", "status": "decided", "options": [{"name": "All 5 channels", "outcome": "Crashed: hit SQLite's Per_Image column limit in CellProfiler's ExportToDatabase ('too many columns on Per_Image').", "chosen": false}, {"name": "DNA (w1 Hoechst) channel only -- the channel used for nuclei segmentation and the one that showed the Plate 25 problem", "outcome": "Works. Adds ~0.2-0.4s per image (not measurably slower in the same Slurm job); the resulting Image_ImageQuality_MaxIntensity_DNA column correctly separates the dim wells (0.17-0.26) from normal wells (0.40-0.57).", "chosen": true}], "evidence": "plan.md section 12; rerx.validate.check_image_quality; rerx.segmentation_check.flag_dim_wells"}, {"id": "illumination_correction", "component": "Illumination correction", "question": "Should an illumination-correction module (CellProfiler's own, or BaSiC) be added to fix the dim-well over-segmentation?", "status": "decided", "options": [{"name": "Add a CorrectIllumination* module", "outcome": "Not tried. The finding was whole-well brightness differences (two dim wells vs. four normal wells on the same plate), not within-field shading/vignetting, which is what illumination correction targets -- the wrong tool for this specific problem.", "chosen": false}, {"name": "No illumination-correction step; fix via thresholding method instead", "outcome": "Adopted -- see the segmentation_threshold decision above.", "chosen": true}], "evidence": "plan.md section 12"}, {"id": "buscar_aggregation_level", "component": "buscar reversal scoring aggregation level", "question": "Score buscar reversal at the single-cell level, or aggregate to one row per well first?", "status": "decided", "options": [{"name": "Single-cell", "outcome": "QC gate failed: median |Cohen's d| 0.339 across 1,482 features, below the 0.5 pass threshold -- mock and disease single cells overlap too much to trust a score at this level.", "chosen": false}, {"name": "Well-level aggregate", "outcome": "QC gate passed: median |Cohen's d| 1.199 across 1,431 features -- mock and disease wells clearly separate once cell-to-cell noise is averaged out. buscar scoring runs at this level.", "chosen": true}], "evidence": "rerx.validate.check_control_separation; reports/buscar_reversal.html"}, {"id": "crop_jpeg_quality", "component": "Cell crop encoding", "question": "Store per-cell crops as lossless images, or JPEG, and at what quality?", "status": "pending", "options": [{"name": "Lossless crops", "outcome": "Not in use. plan.md calls for comparing MorphEm embeddings from lossless in-memory crops against embeddings from stored JPEG crops before ruling this out.", "chosen": false}, {"name": "JPEG quality 95 (current default)", "outcome": "In use as the starting point (plan.md: 'start with high-quality JPEG... validate the choice before freezing it'). The lossless-vs-JPEG MorphEm embedding comparison has not yet been run or recorded, so this default is not yet a confirmed decision.", "chosen": true}], "evidence": "plan.md section 14; src/rerx/crops.py (DEFAULT_JPEG_QUALITY)"}, {"id": "pilot_scale", "component": "Pilot run size", "question": "How big should a pilot run be, and how should a repeat pilot scale up?", "status": "decided", "options": [{"name": "Fixed 42-well pilot (arm_scale=1, the default)", "outcome": "Unchanged from the original pilot design (plan.md section 9: roughly 24-48 wells, all four sites per well).", "chosen": true}, {"name": "Proportionally scaled pilot (RERX_PILOT_SCALE env var / arm_scale > 1)", "outcome": "arm_scale multiplies every pilot arm's well count by the same factor, so control ratios stay fixed while the pilot grows -- e.g. scale=4 gives a 120-well 'pilot-x4' run. Not a redesign of the selection logic, just a size knob on it.", "chosen": true}], "evidence": "src/rerx/metadata.py (select_pilot_wells, arm_scale); workflows/main.nf; scripts/alpine_launch.sh"}]}
+</script>
+
+<script>
+(() => {
+  const dataEl = document.getElementById("report-data");
+  const d = JSON.parse(dataEl.textContent);
+  const section = document.getElementById("decisionsSection");
+
+  (d.decisions || []).forEach((dec) => {
+    const card = document.createElement("div");
+    card.className = "card decision-card";
+
+    const optionsHtml = (dec.options || [])
+      .map(
+        (o) => `
+      <div class="option ${o.chosen ? "chosen" : ""}">
+        <div class="option-head">${o.name}</div>
+        <div class="option-outcome">${o.outcome}</div>
+      </div>`
+      )
+      .join("");
+
+    card.innerHTML = `
+      <div class="decision-head">
+        <div>
+          <div class="decision-component">${dec.component}</div>
+          <div class="decision-question">${dec.question}</div>
+        </div>
+        <span class="status-badge ${dec.status}">${dec.status}</span>
+      </div>
+      <div class="options">${optionsHtml}</div>
+      <div class="evidence">Evidence: <code>${dec.evidence}</code></div>
+    `;
+    section.appendChild(card);
+  });
+})();
+</script>
+
+</body>
+</html>

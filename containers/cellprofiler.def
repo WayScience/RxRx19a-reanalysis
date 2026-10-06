@@ -1,0 +1,15 @@
+Bootstrap: docker
+From: cellprofiler/cellprofiler:4.2.8
+
+# ReRx CellProfiler container. Only `cellprofiler` runs inside this
+# image (via scripts/rerx_tasks.py cellprofiler); all post-processing
+# (cytotable, pycytominer, crops, catalog) runs in the host uv venv,
+# so nothing is installed on top of the pinned upstream CP environment.
+
+%environment
+    export LC_ALL=C
+    export MPLBACKEND=Agg
+    export NUMBA_CACHE_DIR=/tmp
+
+%runscript
+    exec cellprofiler "$@"

@@ -1,0 +1,53 @@
+Bootstrap: docker
+From: python:3.11-slim
+
+# ReRx MorphEm container. Mirrors containers/cellprofiler.def: only the
+# torch-dependent MorphEm inference (scripts/morphem_embed.py) runs in
+# this image. Everything else (cytotable, pycytominer, crops, catalog)
+# stays in the host uv venv, which never gains torch/transformers.
+#
+# The HuggingFace model is BAKED IN at build time (CaicedoLab/MorphEm,
+# trust_remote_code=True) so each job uses the same local, pinned weights
+# without a runtime download. Pins proven in spikes/001-morphem-cpu-vs-gpu:
+#   torch 2.x CPU wheel, transformers==4.46.3 (5.x breaks trust_remote_code).
+
+%files
+    scripts/morphem_embed.py /opt/morphem/morphem_embed.py
+    src/rerx/morphem.py /opt/morphem/rerx_morphem.py
+
+%post
+    # CPU torch wheels first (separate index), then the rest from PyPI.
+    # Versions validated in spikes/001-morphem-cpu-vs-gpu (its .venv):
+    # torch 2.14.0, torchvision 0.29.0, transformers 4.46.3 (5.x breaks
+    # trust_remote_code with all_tied_weights_keys AttributeError).
+    pip install --no-cache-dir \
+        torch==2.14.0 torchvision==0.29.0 \
+        --index-url https://download.pytorch.org/whl/cpu
+    pip install --no-cache-dir \
+        transformers==4.46.3 \
+        pillow numpy pandas pyarrow safetensors huggingface_hub
+    # Download the model once when building the image, not per shard or image.
+    # Inference loads these local weights to avoid per-job downloads.
+    # A networked DeepProfiler service could cache weights once and reuse them instead.
+    # Pin the revision to rerx.morphem.MORPHEM_MODEL_REVISION so the baked model
+    # and any hub fallback use identical code and weights.
+    mkdir -p /opt/morphem/model
+    python - <<'PYEOF'
+import os
+from huggingface_hub import snapshot_download
+snapshot_download(
+    "CaicedoLab/MorphEm",
+    revision="0e8d58787421f83f975634d72420d85c5dfc9c2c",
+    local_dir="/opt/morphem/model",
+)
+print("baked files:", sorted(os.listdir("/opt/morphem/model")))
+PYEOF
+
+%environment
+    export LC_ALL=C
+    export MORPHEM_MODEL_DIR=/opt/morphem/model
+    export PYTHONPATH=/opt/morphem:$PYTHONPATH
+    export HF_HUB_OFFLINE=1
+
+%runscript
+    exec python /opt/morphem/morphem_embed.py "$@"
