@@ -314,12 +314,13 @@ def select_pilot_wells(  # noqa: C901, PLR0915
 
     Finds the smallest set of plates that covers every required arm:
 
-    - Mock controls (healthy reference).
-    - Active SARS-CoV-2 untreated (disease reference).
+    - Mock controls (the healthy state; buscar's target).
+    - Active SARS-CoV-2 untreated (the diseased state; buscar's
+      reference / normalization anchor).
     - UV-inactivated virus (irradiated-virus control).
-    - The positive control (Remdesivir, when present) and a known weak
-      or inactive treatment (Oseltamivir carboxylate), each with
-      several concentrations and replicate wells.
+    - The known-active drug control (Remdesivir, when present) and a
+      known weak or inactive treatment (Oseltamivir carboxylate), each
+      with several concentrations and replicate wells.
 
     Wells are shared across arms where possible (e.g. mock wells double
     as mock-treatment checks). All four sites are kept per well, and the

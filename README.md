@@ -158,9 +158,13 @@ flowchart TD
     E2 --> F
 ```
 
-buscar compares each drug-treated well against two reference states:
-the healthy state (mock) and the diseased state (active untreated
-infection). It does not compare drugs to each other directly.
+buscar scores each perturbation against one comparison anchor: the
+healthy state (mock, buscar's "target"). The diseased state (active
+untreated infection, buscar's "reference") is not a second comparison
+anchor — it sets the on-score's scale: the on-score is the
+mock-to-perturbation distance divided by the mock-to-active_untreated
+distance, so `active_untreated` itself scores exactly 1.0 by
+construction. It does not compare drugs to each other directly.
 
 A treatment is useful only if diseased cells start to look healthy
 again. The on-score checks that. A treatment can also change cell
@@ -169,7 +173,11 @@ The off-score checks that.
 
 A good drug candidate has a low on-score (cells move close to
 healthy) and a low off-score (the drug does not disturb anything
-else).
+else). `active_untreated` scores 1.0 on the on-score by construction;
+every other perturbation is interpreted relative to that anchor
+(near 0 = close to mock, near 1 = as far from mock as untreated
+infection). The UV-inactivated control scoring low is expected —
+inactivated virus should not cause the active-infection morphology.
 
 The scoring needs three pieces of metadata, all added automatically
 during the finalize stage:
@@ -182,18 +190,31 @@ during the finalize stage:
   treatment becomes `<treatment>__<concentration>`, for example
   `Remdesivir (GS-5734)__1.0`.
 - `Metadata_buscar_state` — `Mock` for mock wells, `Active SARS-CoV-2`
-  for every challenged well (UV, active-untreated, treated).
+  for every challenged well (UV, active-untreated, treated). buscar's
+  scoring itself does not read this column (it groups by
+  `Metadata_perturbation`); the state column exists to make the
+  healthy/disease/other grouping explicit in the profile table
+  (plan.md section 18's "do not overload one column" rule).
 
-buscar needs two control populations:
+buscar needs two control populations (naming per buscar's own
+formulation, from buscar's author in PR #2 review):
 
-- **Target (healthy):** `mock` — uninfected cells. The on-score is the
-  distance from this population. 0 means fully rescued to healthy, 1
-  means still diseased.
-- **Reference (disease):** `active_untreated` — infected cells with no
-  drug.
+- **Target / positive control (healthy):** `mock` — uninfected cells.
+  Every on-score is a distance from this population, so lower means
+  closer to healthy. This is the state we want treatments to move
+  cells toward.
+- **Reference / negative control (disease):** `active_untreated` —
+  infected cells with no drug. In buscar's terms the negative control
+  is "disease + vehicle" (e.g. DMSO in other screens); RxRx19a has no
+  vehicle-only wells, so active-untreated infection is the closest
+  analog — the diseased baseline treatments should move away from.
+  Its on-score is exactly 1.0 by construction (it is the normalization
+  denominator).
 
-Remdesivir is our known-active drug control. UV-inactivated virus is
-our challenge control that should look healthy.
+Separately from these two buscar control populations, the pilot carries
+two assay-validation drug controls: Remdesivir is the known-active drug
+(expected to reverse the infection phenotype), and UV-inactivated
+virus is a challenge control that should look healthy.
 
 A note on naming: RxRx19a's metadata has a column called
 `disease_condition`, and `Mock` is one of its values (alongside
@@ -207,8 +228,10 @@ buscar writes two files per plate:
   healthy and disease controls (the "on" signature), and which do not
   (the "off" signature, used to catch off-target effects).
 - `scores.parquet` — one row per perturbation, with an `on_buscar_scores`
-  column (0 means fully reversed to healthy, 1 means no reversal) and an
-  `off_buscar_scores` column (off-target effect size).
+  column (distance from mock, scaled so `active_untreated` = 1.0; lower
+  is more reversed toward healthy) and an `off_buscar_scores` column
+  (proportion of off-signature features that changed; higher is more
+  off-target effect).
 
 ## The result tree
 

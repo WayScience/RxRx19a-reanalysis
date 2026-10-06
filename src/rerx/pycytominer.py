@@ -26,9 +26,14 @@ of overloading one:
     Metadata_pycytominer_control_type -- what Pycytominer's ``samples``
                                          query selects as the
                                          normalization reference
-    Metadata_buscar_state             -- healthy/disease/other, the
-                                         state buscar scoring reads
-                                         (see :mod:`rerx.buscar`)
+    Metadata_buscar_state             -- healthy/disease/other grouping
+                                         (buscar's scoring itself groups
+                                         by Metadata_perturbation; this
+                                         column exists to keep the state
+                                         explicit rather than overloaded,
+                                         per plan.md section 18 -- see
+                                         :mod:`rerx.buscar` and
+                                         :func:`buscar_state`)
 """
 
 from pathlib import Path
@@ -199,9 +204,10 @@ def buscar_state(rxrx_control: str) -> str:
     str
         :data:`rerx.metadata.HEALTHY_STATE` for mock,
         :data:`rerx.metadata.DISEASE_STATE` for UV or active/untreated
-        or treated wells (all are SARS-CoV-2-challenged; buscar treats
-        "disease" as the reference to reverse away from), else
-        :data:`BUSCAR_STATE_OTHER`.
+        or treated wells (all are SARS-CoV-2-challenged, so all carry
+        the disease-challenge state label; note buscar's scoring
+        itself does not read this column -- see the module docstring),
+        else :data:`BUSCAR_STATE_OTHER`.
     """
     if rxrx_control == RXRX_CONTROL_MOCK:
         return HEALTHY_STATE

@@ -100,11 +100,14 @@
     <h2>What buscar measures</h2>
     <p class="lede">
       buscar (Bioactive Unbiased Single-cell Compound Assessment and Ranking) scores
-      each treatment on two numbers. The <strong>on-score</strong> asks: how far does
-      this treatment sit from the healthy (mock) cells, using the features that
-      actually change between healthy and diseased cells? A low on-score means strong
-      reversal. The <strong>off-score</strong> asks: does the treatment also change
-      features that should not move? A low off-score means the treatment is specific,
+      each perturbation on two numbers, both measured against one anchor: the
+      healthy (mock) population, buscar's <strong>target</strong>. The
+      <strong>on-score</strong> is the distance from mock in the features that
+      actually change between healthy and diseased cells, scaled so the diseased
+      control (<code>active_untreated</code>, buscar's <strong>reference</strong>)
+      sits at exactly 1.0 — a low on-score means strong reversal toward healthy.
+      The <strong>off-score</strong> asks: does the treatment also change features
+      that should not move? A low off-score means the treatment is specific,
       not just generally disruptive to the cell.
     </p>
     <div class="grid-3">
@@ -156,11 +159,14 @@
   <section>
     <h2>Dose response</h2>
     <p class="lede">
-      Remdesivir is the pilot's known-active positive control; Oseltamivir carboxylate
-      is a known-inactive negative control (it targets a different virus family, not
-      coronaviruses). A working buscar score should show Remdesivir's reversal getting
-      stronger (on-score dropping) as the dose increases, and Oseltamivir staying flat
-      and weak across doses.
+      Remdesivir is the pilot's known-active drug (expected to reverse the infection
+      phenotype at higher doses); Oseltamivir carboxylate is a known-inactive drug
+      (it targets a different virus family, not coronaviruses). A working buscar score
+      should show Remdesivir's reversal getting stronger (on-score dropping) as the
+      dose increases, and Oseltamivir staying flat and weak across doses. (Note these
+      are assay-validation drug controls, distinct from buscar's own two control
+      populations — mock is the healthy target, active_untreated the diseased
+      reference.)
     </p>
     <div class="card">
       <canvas id="doseResponse" height="90"></canvas>
@@ -396,7 +402,8 @@ const summary = `
 At the well level, Remdesivir shows the dose-dependent reversal buscar is meant to
 detect: its on-score falls from ${worstRemdesivir.y.toFixed(2)} at ${worstRemdesivir.x} µM
 to ${bestRemdesivir.y.toFixed(2)} at ${bestRemdesivir.x} µM, meaning higher
-doses move cells closer to the healthy reference. Oseltamivir carboxylate, the known
+doses move cells closer to the healthy target (mock; the disease reference,
+active_untreated, is the 1.0 anchor, not the destination). Oseltamivir carboxylate, the known
 weak/inactive control, never drops below ${bestOseltamivir.y.toFixed(2)} at any dose,
 consistent with it not treating this disease. Every off-score in this pilot is 0.00:
 with only 1-2 wells per treatment, the KS-test buscar uses to flag off-target

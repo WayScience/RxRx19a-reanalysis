@@ -2,8 +2,10 @@
 buscar reversal scoring for ReRx.
 
 Implements plan.md sections 16-17: wraps ``buscar.calculate_buscar_scores``
-(Polar-based) to compute on/off reversal scores for each condition relative to
-the healthy (target) and disease (reference) controls, and writes
+(Polar-based) to compute on/off reversal scores for each perturbation,
+measured against the healthy target (mock) with the disease reference
+(active_untreated) as the on-score's normalization anchor (its own
+on-score is exactly 1.0 by construction). Writes
 ``buscar/<profiler>/signatures.parquet`` and ``scores.parquet``.
 """
 
@@ -47,11 +49,17 @@ class BuscarConfig:
         Disease (reference) perturbation label -- a value of
         ``perturbation_col`` (plan.md section 19's "viral control";
         default ``"active_untreated"``, matching
-        :data:`rerx.pycytominer.RXRX_CONTROL_ACTIVE_UNTREATED`).
+        :data:`rerx.pycytominer.RXRX_CONTROL_ACTIVE_UNTREATED`). In
+        buscar's control vocabulary this is the negative control
+        (disease + no effective treatment; DMSO-vehicle in other
+        screens), and the on-score's normalization anchor: its own
+        on-score is exactly 1.0.
     target_state : str
         Healthy (target) perturbation label -- a value of
         ``perturbation_col`` (plan.md section 19's "mock"; default
         ``"mock"``, matching :data:`rerx.pycytominer.RXRX_CONTROL_MOCK`).
+        In buscar's control vocabulary this is the positive control
+        (the healthy state we want treatments to move cells toward).
     perturbation_col : str
         Metadata column holding condition identifiers (default
         ``"Metadata_perturbation"``, added by
