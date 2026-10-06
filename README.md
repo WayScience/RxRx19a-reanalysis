@@ -131,107 +131,69 @@ plate.
 
 ## buscar reversal scoring
 
-buscar (`rerx.buscar`) answers two questions per treatment:
-
-1. How far does this treatment move a diseased cell back toward the
-   healthy state? (the on-score)
-1. Does the treatment touch anything else? (the off-score, which
-   flags off-target effects)
+Here is the whole comparison: RxRx19a provides healthy, infected, and
+infected-plus-treatment wells. buscar learns what infection changes from
+the first two groups, then scores each drug and dose against them. It
+runs separately for each plate and feature set (CellProfiler or MorphEm)
+after the control-separation QC check passes.
 
 ```mermaid
 flowchart TD
-    A["RxRx19a images<br/>(kidney cells, 5 channels)"] --> B["CellProfiler / MorphEm<br/>(one row of numbers per cell)"]
-    B --> C1["Mock wells<br/>(no virus: the healthy state)"]
-    B --> C2["Active untreated wells<br/>(virus, no drug: the diseased state)"]
-    B --> C3["Treated wells<br/>(virus + one drug dose)"]
-
-    C1 --> D["buscar builds two signatures:<br/>which numbers separate healthy from diseased"]
-    C2 --> D
-
-    D --> E1["On-score for each treatment:<br/>how far it moves cells toward healthy"]
-    D --> E2["Off-score for each treatment:<br/>does it change anything unrelated"]
-
-    C3 --> E1
-    C3 --> E2
-
-    E1 --> F["Low on-score + low off-score<br/>= a promising drug candidate"]
-    E2 --> F
+    H["RxRx19a mock<br/>healthy = buscar target"]
+    I["RxRx19a active_untreated<br/>infected = buscar reference"]
+    H --> S["1. Learn infection-related<br/>and other cell features"]
+    I --> S
+    S --> B["2. buscar scores each<br/>drug + dose"]
+    T["RxRx19a treated<br/>infected + drug + dose"] --> B
+    B --> R["buscar on-score:<br/>closer to RxRx19a mock?<br/>buscar off-score:<br/>other features changed?"]
+    R --> C["Compare drug + dose trends<br/>and known-active / inactive drugs<br/>across plates and<br/>CellProfiler / MorphEm"]
 ```
 
-buscar scores each perturbation against one comparison anchor: the
-healthy state (mock, buscar's "target"). The diseased state (active
-untreated infection, buscar's "reference") is not a second comparison
-anchor — it sets the on-score's scale: the on-score is the
-mock-to-perturbation distance divided by the mock-to-active_untreated
-distance, so `active_untreated` itself scores exactly 1.0 by
-construction. It does not compare drugs to each other directly.
+**What the labels mean:** RxRx19a `mock` means uninfected wells; these
+fill buscar's **target** (healthy) role. RxRx19a `active_untreated`
+means infected wells with no drug; these fill buscar's **reference**
+(disease) role. RxRx19a `treated` wells contain infected cells given a
+particular drug and dose. buscar's target/reference roles are not drug
+controls: Remdesivir (known active) and Oseltamivir carboxylate (known
+inactive) are drugs used to check whether the scores behave sensibly.
+RxRx19a `uv` (inactivated virus) is another check, not buscar's target
+or reference. There are no vehicle-only wells in RxRx19a, so its
+`active_untreated` group is a disease-reference analog, not literally
+"disease + vehicle."
 
-A treatment is useful only if diseased cells start to look healthy
-again. The on-score checks that. A treatment can also change cell
-shape or behavior in ways that have nothing to do with the virus.
-The off-score checks that.
+**How scoring works:** buscar uses the two control groups on the same
+plate to identify features that differ with infection (the *buscar on*
+signature) and features that do not (the *buscar off* signature). For
+each RxRx19a drug-and-dose group, the buscar on-score measures distance
+from the healthy buscar target in infection-related features. RxRx19a
+`active_untreated` has a buscar on-score of **1.0** by construction; a
+score near **0** is closer to RxRx19a `mock`. The buscar off-score
+measures the fraction of other features that change compared with
+RxRx19a `mock`; lower is better for both scores. A buscar on-score can
+exceed 1.0. These are morphology comparisons, not proof that a drug
+treats infection or is free of side effects. buscar scores each group
+against RxRx19a `mock`, using RxRx19a `active_untreated` to set the
+buscar on-score scale; it does not compare two drugs directly.
 
-A good drug candidate has a low on-score (cells move close to
-healthy) and a low off-score (the drug does not disturb anything
-else). `active_untreated` scores 1.0 on the on-score by construction;
-every other perturbation is interpreted relative to that anchor
-(near 0 = close to mock, near 1 = as far from mock as untreated
-infection). The UV-inactivated control scoring low is expected —
-inactivated virus should not cause the active-infection morphology.
+**What we can compare from the scores:** Each scored plate and feature
+set produces buscar on-scores and buscar off-scores for drug-and-dose
+groups and RxRx19a controls. We can then compare dose trends and
+known-active versus known-inactive drugs. Across plates, we can check
+whether these patterns repeat. By scoring CellProfiler and MorphEm
+separately, we can ask whether the two feature sets favor the same
+treatments. Their feature values and signatures differ, so compare
+score patterns rather than raw features. A plate whose healthy and
+infected controls do not separate is skipped, not given buscar scores.
 
-The scoring needs three pieces of metadata, all added automatically
-during the finalize stage:
-
-- `Metadata_rxrx_control_type` — RxRx19a's own control label (`mock`,
-  `uv`, `active_untreated`, `treated`).
-- `Metadata_perturbation` — a stable identifier for buscar to group
-  replicate wells by. Mock, UV, and active-untreated controls each get
-  their own value (so their differences stay visible). A dosed
-  treatment becomes `<treatment>__<concentration>`, for example
-  `Remdesivir (GS-5734)__1.0`.
-- `Metadata_buscar_state` — `Mock` for mock wells, `Active SARS-CoV-2`
-  for every challenged well (UV, active-untreated, treated). buscar's
-  scoring itself does not read this column (it groups by
-  `Metadata_perturbation`); the state column exists to make the
-  healthy/disease/other grouping explicit in the profile table
-  (plan.md section 18's "do not overload one column" rule).
-
-buscar needs two control populations (naming per buscar's own
-formulation, from buscar's author in PR #2 review):
-
-- **Target / positive control (healthy):** `mock` — uninfected cells.
-  Every on-score is a distance from this population, so lower means
-  closer to healthy. This is the state we want treatments to move
-  cells toward.
-- **Reference / negative control (disease):** `active_untreated` —
-  infected cells with no drug. In buscar's terms the negative control
-  is "disease + vehicle" (e.g. DMSO in other screens); RxRx19a has no
-  vehicle-only wells, so active-untreated infection is the closest
-  analog — the diseased baseline treatments should move away from.
-  Its on-score is exactly 1.0 by construction (it is the normalization
-  denominator).
-
-Separately from these two buscar control populations, the pilot carries
-two assay-validation drug controls: Remdesivir is the known-active drug
-(expected to reverse the infection phenotype), and UV-inactivated
-virus is a challenge control that should look healthy.
-
-A note on naming: RxRx19a's metadata has a column called
-`disease_condition`, and `Mock` is one of its values (alongside
-`UV Inactivated SARS-CoV-2` and `Active SARS-CoV-2`). But `Mock`
-there means the uninfected control — the healthy baseline — not a
-diseased state.
-
-buscar writes two files per plate:
-
-- `signatures.parquet` — which morphology features move between the
-  healthy and disease controls (the "on" signature), and which do not
-  (the "off" signature, used to catch off-target effects).
-- `scores.parquet` — one row per perturbation, with an `on_buscar_scores`
-  column (distance from mock, scaled so `active_untreated` = 1.0; lower
-  is more reversed toward healthy) and an `off_buscar_scores` column
-  (proportion of off-signature features that changed; higher is more
-  off-target effect).
+The finalize stage records RxRx19a well labels in
+`Metadata_rxrx_control_type`, and groups replicates for scoring with
+`Metadata_perturbation` (for example,
+`Remdesivir (GS-5734)__1.0`). `Metadata_buscar_state` labels wells for
+inspection but is not used to calculate scores. For each scored plate
+and profiler, buscar writes `signatures.parquet` (on/off feature lists)
+and `scores.parquet` (one row per group, including
+`on_buscar_scores` and `off_buscar_scores`; the healthy buscar target
+itself is excluded from this score table).
 
 ## The result tree
 
