@@ -12,12 +12,7 @@
     "Metadata_n_nuclei_2_cp_robustbackground": 164,
     "Metadata_n_nuclei_3_cp_otsu": 161,
     "Metadata_n_nuclei_4_cp_mincrossentropy": 167,
-    "Metadata_n_nuclei_5_cp_adaptive": 168,
-    "Image_PathName_1_cellpose": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_2_cp_robustbackground": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_3_cp_otsu": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_4_cp_mincrossentropy": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_5_cp_adaptive": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays"
+    "Metadata_n_nuclei_5_cp_adaptive": 168
   },
   {
     "Metadata_well": "AA08",
@@ -32,12 +27,7 @@
     "Metadata_n_nuclei_2_cp_robustbackground": 177,
     "Metadata_n_nuclei_3_cp_otsu": 660,
     "Metadata_n_nuclei_4_cp_mincrossentropy": 314,
-    "Metadata_n_nuclei_5_cp_adaptive": 863,
-    "Image_PathName_1_cellpose": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_2_cp_robustbackground": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_3_cp_otsu": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_4_cp_mincrossentropy": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_5_cp_adaptive": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays"
+    "Metadata_n_nuclei_5_cp_adaptive": 863
   },
   {
     "Metadata_well": "AA09",
@@ -52,12 +42,7 @@
     "Metadata_n_nuclei_2_cp_robustbackground": 141,
     "Metadata_n_nuclei_3_cp_otsu": 141,
     "Metadata_n_nuclei_4_cp_mincrossentropy": 153,
-    "Metadata_n_nuclei_5_cp_adaptive": 147,
-    "Image_PathName_1_cellpose": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_2_cp_robustbackground": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_3_cp_otsu": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_4_cp_mincrossentropy": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_5_cp_adaptive": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays"
+    "Metadata_n_nuclei_5_cp_adaptive": 147
   },
   {
     "Metadata_well": "AA16",
@@ -72,12 +57,7 @@
     "Metadata_n_nuclei_2_cp_robustbackground": 159,
     "Metadata_n_nuclei_3_cp_otsu": 163,
     "Metadata_n_nuclei_4_cp_mincrossentropy": 164,
-    "Metadata_n_nuclei_5_cp_adaptive": 185,
-    "Image_PathName_1_cellpose": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_2_cp_robustbackground": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_3_cp_otsu": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_4_cp_mincrossentropy": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_5_cp_adaptive": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays"
+    "Metadata_n_nuclei_5_cp_adaptive": 185
   },
   {
     "Metadata_well": "E08",
@@ -92,12 +72,7 @@
     "Metadata_n_nuclei_2_cp_robustbackground": 170,
     "Metadata_n_nuclei_3_cp_otsu": 517,
     "Metadata_n_nuclei_4_cp_mincrossentropy": 349,
-    "Metadata_n_nuclei_5_cp_adaptive": 697,
-    "Image_PathName_1_cellpose": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_2_cp_robustbackground": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_3_cp_otsu": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_4_cp_mincrossentropy": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_5_cp_adaptive": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays"
+    "Metadata_n_nuclei_5_cp_adaptive": 697
   },
   {
     "Metadata_well": "E16",
@@ -112,11 +87,6 @@
     "Metadata_n_nuclei_2_cp_robustbackground": 146,
     "Metadata_n_nuclei_3_cp_otsu": 150,
     "Metadata_n_nuclei_4_cp_mincrossentropy": 149,
-    "Metadata_n_nuclei_5_cp_adaptive": 166,
-    "Image_PathName_1_cellpose": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_2_cp_robustbackground": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_3_cp_otsu": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_4_cp_mincrossentropy": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays",
-    "Image_PathName_5_cp_adaptive": "/Users/buntend/.hermes/cache/scratch/segcompare/review/overlays"
+    "Metadata_n_nuclei_5_cp_adaptive": 166
   }
 ]

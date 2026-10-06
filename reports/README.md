@@ -26,7 +26,11 @@ network, and no build step.
   Otsu-threshold finding that motivated switching to Robust Background
   (two dim wells out of six sampled, 3-7x over-segmented; 304% mean
   abs. count error vs. Cellpose on those two wells, 9% on the other
-  four). A methods/decision report, not a biology result.
+  four). Notes that Cellpose is a reference, not ground truth (a later
+  visual side-by-side via `scripts/segmentation_cytodataframe_compare.py`
+  showed its boundaries trace the whole-cell signal, while the
+  dim-well failure of Otsu/Adaptive/MCE is directly visible regardless).
+  A methods/decision report, not a biology result.
 - `decisions.html` — a curated record of other pipeline-configuration
   decisions (image-quality QC scope, illumination correction, buscar
   aggregation level, crop JPEG quality, pilot run size): options

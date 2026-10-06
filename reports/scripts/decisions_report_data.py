@@ -83,7 +83,12 @@ DECISIONS: list[dict] = [
                     "dropped from 107% to 13% on Plate 25's 24-site "
                     "sample, without under-segmenting the already-fine "
                     "wells. Re-validated on Plates 1 and 13 (48 more "
-                    "sites): mean error 5.0% vs. Otsu's 7.3%."
+                    "sites): mean error 5.0% vs. Otsu's 7.3%. A later "
+                    "visual side-by-side (all variants on the same "
+                    "six sites, scripts/"
+                    "segmentation_cytodataframe_compare.py) confirmed "
+                    "its mask boundaries hug the nuclei on the dim "
+                    "wells where the others fragment or over-split."
                 ),
                 "chosen": True,
             },

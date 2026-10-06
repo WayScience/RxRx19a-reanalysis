@@ -251,6 +251,21 @@ def build_buscar_payload() -> dict:
 
 def main() -> None:
     phenotypic = build_phenotypic_payload()
+
+    # Merge the side payloads that phenotypic_overview.html renders but
+    # prepare_data.py itself does not compute: UMAP coordinates
+    # (umap_report_data.py) and the MorphEm section (morphem_report_data.py
+    # plus the MorphEm UMAP points). Without this merge, re-running
+    # embed_data.py on a freshly generated phenotypic payload silently
+    # drops those sections from the committed report.
+    umap = json.loads((DATA_DIR / "umap_report.json").read_text())
+    morphem = json.loads((DATA_DIR / "morphem_report.json").read_text())
+    phenotypic["cellprofiler_umap"] = umap["cellprofiler_umap"]
+    phenotypic["recursion_umap"] = umap["recursion_umap"]
+    morphem = dict(morphem)
+    morphem["umap_points"] = umap["morphem_umap"]
+    phenotypic["morphem"] = morphem
+
     (DATA_DIR / "phenotypic_report_data.json").write_text(
         json.dumps(phenotypic, indent=None)
     )

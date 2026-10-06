@@ -30,15 +30,20 @@ cytodataframe quirk (confirmed against 0.4.0's source): image columns are
 only detected by VALUE, scanning for filenames ending in ``.tif``/
 ``.tiff`` -- a ``.png`` filename in the column is silently never treated
 as an image reference at all. Overlays are rendered as TIFF for this
-reason. The FileName/PathName column pair only needs "FileName"/
-"PathName" as a substring (not an exact "Image_FileName_X" prefix), so
-one such pair per method name works for the wide layout below.
+reason. No ``Image_PathName_*`` sibling column is needed per image
+column (confirmed directly against 0.4.0): passing ``data_context_dir``
+to ``CytoDataFrame`` resolves bare filenames against that one directory,
+so the data itself never has to carry an absolute directory string --
+only the generated notebook's one ``data_context_dir`` argument does,
+and that is written as a path relative to the notebook's own location,
+not an absolute scratch path.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -59,7 +64,7 @@ CONDITIONS = {
     "E16": "Mock",
 }
 
-_TEMPLATE = '''# %% [markdown]
+_TEMPLATE = r"""# %% [markdown]
 # # Segmentation method comparison -- {wells_label}
 #
 # DNA (w1) images with each method's mask boundaries, one row per site,
@@ -72,15 +77,21 @@ import re
 
 import pandas as pd
 from cytodataframe import CytoDataFrame
-from IPython.display import HTML, display
+from IPython.display import HTML, display  # noqa: A004
 
-meta = pd.read_json(r"{meta_json_path}")
+meta = pd.read_json(r"{meta_json_name}")
 
 # %%
 IMAGE_DISPLAY_PX = 420
 
 cdf = CytoDataFrame(
     meta,
+    # Images resolve against this one directory (relative to the
+    # notebook's working directory, not an absolute scratch path) -- no
+    # Image_PathName_* column needed per method; see
+    # get_image_paths_from_data in cytodataframe's source for why that
+    # column is optional.
+    data_context_dir=r"{image_dir_name}",
     display_options={{
         "render_whole_image": True,
         "width": IMAGE_DISPLAY_PX,
@@ -98,7 +109,7 @@ html = re.sub(
     html,
 )
 display(HTML(html))
-'''
+"""
 
 
 def _load_gray(path: Path) -> "np.ndarray":
@@ -165,7 +176,9 @@ class MaskSource:
     def parse(cls, text: str) -> "MaskSource":
         name, rest = text.split("=", 1)
         directory, filename_pattern = rest.rsplit(":", 1)
-        return cls(name=name, directory=Path(directory), filename_pattern=filename_pattern)
+        return cls(
+            name=name, directory=Path(directory), filename_pattern=filename_pattern
+        )
 
 
 def build_comparison(
@@ -177,23 +190,24 @@ def build_comparison(
 ) -> Path:
     """Render every (well, method) overlay and write the WIDE metadata
     JSON the generated notebook reads: one row per well, with one
-    ``Image_FileName_<label>``/``Image_PathName_<label>`` column pair
-    per method so every method's mask for that site renders in the same
-    row.
+    ``Image_FileName_<label>`` column per method so every method's mask
+    for that site renders in the same row. No ``Image_PathName_*``
+    sibling column is written -- the image directory is supplied once,
+    to ``CytoDataFrame(data_context_dir=...)`` in the generated
+    notebook, not repeated as an absolute path in every row's data (see
+    the module docstring).
 
     Column order within each row is deliberate, not insertion-order
     incidental: all ``Image_FileName_*`` (the actual rendered
     thumbnails) sit adjacent to each other right after the metadata
     columns, so scanning across a row is an unbroken strip of images --
-    not image/count/path/image/count/path, which breaks up the visual
-    comparison the whole point of this notebook is to support. The
-    per-method counts and the ``Image_PathName_*`` columns cytodataframe
-    needs internally (but a human never needs to look at) are grouped
-    separately, after every image column. Each label is prefixed with
-    its 1-based position (``1_cellpose``, ``2_cp_robustbackground``,
-    ...) so the column header itself states both the method name and
-    its left-to-right order, and column order stays stable regardless
-    of how ``--mask`` arguments are supplied.
+    not image/count/image/count, which breaks up the visual comparison
+    the whole point of this notebook is to support. The per-method
+    counts are grouped separately, after every image column. Each label
+    is prefixed with its 1-based position (``1_cellpose``,
+    ``2_cp_robustbackground``, ...) so the column header itself states
+    both the method name and its left-to-right order, and column order
+    stays stable regardless of how ``--mask`` arguments are supplied.
 
     Returns the metadata JSON path.
     """
@@ -209,7 +223,6 @@ def build_comparison(
 
         image_cols: dict[str, str] = {}
         count_cols: dict[str, int] = {}
-        path_cols: dict[str, str] = {}
         for source, label in zip(masks, labels):
             mask_path = source.directory / source.filename_pattern.format(well=well)
             if not mask_path.is_file():
@@ -219,7 +232,6 @@ def build_comparison(
             n_objects = render_overlay(dna_path, mask_path, image_dir / out_name)
             image_cols[f"Image_FileName_{label}"] = out_name
             count_cols[f"Metadata_n_nuclei_{label}"] = n_objects
-            path_cols[f"Image_PathName_{label}"] = str(image_dir)
             print(f"{well}/{source.name}: {n_objects} nuclei -> {out_name}")
 
         row = {
@@ -228,7 +240,6 @@ def build_comparison(
             "Metadata_dim_well": well in DIM_WELLS,
             **image_cols,
             **count_cols,
-            **path_cols,
         }
         rows.append(row)
 
@@ -240,13 +251,27 @@ def build_comparison(
 def build_notebook(
     meta_json_path: Path, wells: list[str], methods: list[str], out_path: Path
 ) -> Path:
+    """Write the jupytext notebook source.
+
+    ``meta_json_path`` and the ``overlays`` image directory are written
+    into the notebook as paths relative to ``out_path``'s directory, not
+    resolved to absolute paths -- the notebook only works correctly when
+    opened with that directory as its working directory (true for both
+    `jupyter lab`/`jupytext --execute` and this script's own default
+    layout, where the notebook and its data are always siblings).
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_json_name = os.path.relpath(Path(meta_json_path), start=out_path.parent)
+    image_dir_name = os.path.relpath(
+        Path(meta_json_path).parent / "overlays", start=out_path.parent
+    )
     source = _TEMPLATE.format(
         wells_label=", ".join(wells),
         methods_label=", ".join(methods),
-        meta_json_path=Path(meta_json_path).resolve(),
+        meta_json_name=meta_json_name,
+        image_dir_name=image_dir_name,
     )
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(source)
     return out_path
 
@@ -259,13 +284,12 @@ def main() -> None:
         dest="masks",
         action="append",
         required=True,
-        help='NAME=DIR:FILENAME_PATTERN, e.g. "cellpose=/tmp/m:{well}_cellpose_mask.tiff"',
+        help="NAME=DIR:FILENAME_PATTERN, e.g. "
+        '"cellpose=/tmp/m:{well}_cellpose_mask.tiff"',
     )
     parser.add_argument("--wells", nargs="+", required=True)
     parser.add_argument("--out-dir", required=True, type=Path)
-    parser.add_argument(
-        "--dna-filename-pattern", default="HRCE-1_25_{well}_1_w1.png"
-    )
+    parser.add_argument("--dna-filename-pattern", default="HRCE-1_25_{well}_1_w1.png")
     parser.add_argument("--out-notebook", type=Path, default=None)
     args = parser.parse_args()
 

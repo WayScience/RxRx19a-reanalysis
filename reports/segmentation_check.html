@@ -110,6 +110,18 @@
       procedure and <code>plan.md</code>'s segmentation review section for the
       complete investigation, including the post-fix re-validation numbers.
     </p>
+    <p class="note">
+      Cellpose here is a <strong>reference, not ground truth</strong>: it was
+      never independently hand-validated. A later side-by-side visual
+      comparison (all thresholding variants on the same six sites, built with
+      <code>scripts/segmentation_cytodataframe_compare.py</code>) showed
+      Cellpose's boundaries trace the dim whole-cell signal rather than the
+      tight bright nucleus, while Robust Background's boundaries hug the
+      nucleus. The dim-well finding stands regardless of Cellpose's own
+      imperfection &mdash; Otsu's and Adaptive's collapse into hundreds of
+      spurious fragments, and Minimum Cross-Entropy's ~2&times;
+      over-segmentation, are directly visible in those same images.
+    </p>
     <div class="grid-3">
       <div class="card stat"><div class="value" id="statSites">—</div><div class="label">sites sampled (6 wells &times; 4 sites)</div></div>
       <div class="card stat"><div class="value" id="statCpTotal">—</div><div class="label">CellProfiler nuclei (pooled)</div></div>
