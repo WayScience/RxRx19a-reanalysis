@@ -27,11 +27,11 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install the latest version of uv
-        uses: astral-sh/setup-uv@v10.0.1
+        uses: astral-sh/setup-uv@v10.2.0
       # use prek for speedy precommit results
       - uses: j178/prek-action@v3.0.0
       # run pre-commit ci lite for automated fixes
-      - uses: pre-commit-ci/lite-action@v1.1.0
+      - uses: pre-commit-ci/lite-action@v1.2.0
         if: ${{ !cancelled() }}
   run_tests:
     needs: pre_commit_checks
@@ -46,7 +46,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install the latest version of uv
-        uses: astral-sh/setup-uv@v10.0.1
+        uses: astral-sh/setup-uv@v10.2.0
       - name: Run pytest
         run: uv run --frozen pytest
   pilot_e2e:
@@ -62,7 +62,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install the latest version of uv
-        uses: astral-sh/setup-uv@v10.0.1
+        uses: astral-sh/setup-uv@v10.2.0
       - name: Pull the CellProfiler container
         run: docker pull cellprofiler/cellprofiler:4.2.8
       - name: Run the full local pilot pipeline e2e test
