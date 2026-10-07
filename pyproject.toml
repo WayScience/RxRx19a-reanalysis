@@ -6,9 +6,6 @@ requires = [ "setuptools>=64", "setuptools-scm>=8" ]
 name = "rerx"
 description = "Single-cell phenotypic reversal in RxRx19a"
 readme = "README.md"
-authors = [
-  { name = "d33bs" },
-]
 requires-python = ">=3.11"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
@@ -31,7 +28,10 @@ dependencies = [
   "pycytominer>=1.7.1",
   "requests>=2.32.3",
 ]
-scripts.rerx = "rerx.cli:trigger"
+[[project.authors]]
+name = "d33bs"
+[project.scripts]
+rerx = "rerx.cli:trigger"
 
 [dependency-groups]
 dev = [
@@ -58,22 +58,26 @@ notebooks = [
 [tool.setuptools]
 package-dir = { "" = "src" }
 include-package-data = true
-
-[tool.setuptools.packages.find]
-where = [ "src" ]
-include = [ "rerx*" ]
+[tool.setuptools.packages]
+find.where = [ "src" ]
+find.include = [ "rerx*" ]
 
 [tool.setuptools_scm]
-root = "."
+version_file = "src/rerx/_version.py"
 version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
-version_file = "src/rerx/_version.py"
+root = "."
+
+[tool.uv]
+[tool.uv.sources]
+buscar = { git = "https://github.com/WayScience/buscar.git" }
 
 [tool.ruff]
 target-version = "py311"
 line-length = 88
 fix = true
-lint.select = [
+[tool.ruff.lint]
+select = [
   # flake8-builtins
   "A",
   # flake8-annotations
@@ -96,12 +100,20 @@ lint.select = [
   "SIM",
   "W",
 ]
+# Pipeline commands and optional imaging backends use deliberate lazy imports.
+# Moving them to module scope would load heavy dependencies on unrelated paths.
+ignore = [ "PLC0415" ]
 # Ignore `F401` (unused imports) for `__init__.py` file
-lint.per-file-ignores."__init__.py" = [ "F401" ]
+per-file-ignores."__init__.py" = [ "F401" ]
 # Tests favor readable literal assertions over named constants, and mock
 # callback signatures don't need full type annotations.
-lint.per-file-ignores."tests/*.py" = [ "ANN001", "ANN202", "PLR2004" ]
+per-file-ignores."tests/*.py" = [ "ANN001", "ANN202", "PLR2004" ]
 
+[tool.vulture]
+paths = [ ".vulture_whitelist.py", "src/rerx", "tests" ]
+min_confidence = 90
+
+[tool.pytest]
 [tool.pytest.ini_options]
 pythonpath = [ "." ]
 addopts = [
@@ -112,17 +124,21 @@ addopts = [
   "not pilot_e2e",
 ]
 markers = [
-  "pilot_e2e: full local pilot pipeline against a real CellProfiler container (needs Docker; run explicitly with `-m pilot_e2e`)",
+  """\
+  pilot_e2e: full local pilot pipeline against a real CellProfiler container (needs Docker; run explicitly with `-m \
+  pilot_e2e`)\
+  """,
 ]
 
+[tool.coverage]
 [tool.coverage.run]
-branch = true
 source = [ "src/rerx" ]
-
+branch = true
 [tool.coverage.report]
-show_missing = true
 skip_covered = true
+show_missing = true
 
+[tool.poe]
 [tool.poe.tasks]
 # tasks for development environments
 test.shell = """
@@ -140,10 +156,3 @@ jupyter lab
 
 [tool.jupytext]
 formats = "ipynb,py:light"
-
-[tool.vulture]
-min_confidence = 90
-paths = [ "src/rerx", "tests", ".vulture_whitelist.py" ]
-
-[tool.uv.sources]
-buscar = { git = "https://github.com/WayScience/buscar.git" }

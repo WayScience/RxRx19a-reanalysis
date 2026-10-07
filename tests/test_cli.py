@@ -123,15 +123,12 @@ def test_runs_delete_rejects_malformed_run_id(
         RunsCLI().delete("not-a-real-run-id")
 
 
-def test_show_message_cli(my_data: str) -> None:
-    """
-    Test the show_message function from the CLI.
-    """
-
+def test_show_message_cli() -> None:
+    """Run the installed CLI entry point with a message."""
     output = subprocess.run(
-        ["uv", "run", "ReRx", "show_message", "--message='Hello terminal!'"],
+        ["uv", "run", "--frozen", "rerx", "show_message", "--message=Hello terminal!"],
         capture_output=True,
         text=True,
         check=True,
     )
-    assert "Hello terminal!" in str(output.stdout)
+    assert "Hello terminal!" in output.stdout

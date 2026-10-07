@@ -125,25 +125,29 @@ def test_compare_counts_raises_on_mismatched_site_keys() -> None:
         compare_counts(reference, candidate)
 
 
-_SAMPLE_CPPIPE = """\
-CellProfiler Pipeline: http://www.cellprofiler.org
-Version:5
-DateRevision:424
-GitHash:
-ModuleCount:2
-HasImagePlaneDetails:False
-
-Images:[module_num:1|svn_version:'Unknown'|variable_revision_number:2|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    :
-    Filter images?:Images only
-
-IdentifyPrimaryObjects:[module_num:2|svn_version:'Unknown'|variable_revision_number:15|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Select the input image:DNA
-    Name the primary objects to be identified:Nuclei
-    Threshold strategy:Global
-    Thresholding method:Otsu
-    Threshold correction factor:1.0
-"""
+_SAMPLE_CPPIPE = (
+    "CellProfiler Pipeline: http://www.cellprofiler.org\n"
+    "Version:5\n"
+    "DateRevision:424\n"
+    "GitHash:\n"
+    "ModuleCount:2\n"
+    "HasImagePlaneDetails:False\n"
+    "\n"
+    "Images:[module_num:1|svn_version:'Unknown'|variable_revision_number:2|"
+    "show_window:False|notes:[]|batch_state:array([], dtype=uint8)|"
+    "enabled:True|wants_pause:False]\n"
+    "    :\n"
+    "    Filter images?:Images only\n"
+    "\n"
+    "IdentifyPrimaryObjects:[module_num:2|svn_version:'Unknown'|"
+    "variable_revision_number:15|show_window:False|notes:[]|"
+    "batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]\n"
+    "    Select the input image:DNA\n"
+    "    Name the primary objects to be identified:Nuclei\n"
+    "    Threshold strategy:Global\n"
+    "    Thresholding method:Otsu\n"
+    "    Threshold correction factor:1.0\n"
+)
 
 
 def test_build_threshold_variant_changes_only_the_named_setting() -> None:
@@ -167,9 +171,7 @@ def test_build_threshold_variant_changes_only_the_named_setting() -> None:
 
 def test_build_threshold_variant_raises_when_setting_not_found() -> None:
     with pytest.raises(ValueError, match="not found"):
-        build_threshold_variant(
-            _SAMPLE_CPPIPE, setting="No Such Setting", value="x"
-        )
+        build_threshold_variant(_SAMPLE_CPPIPE, setting="No Such Setting", value="x")
 
 
 def test_flag_dim_wells_flags_a_well_whose_intensity_is_a_plate_outlier() -> None:

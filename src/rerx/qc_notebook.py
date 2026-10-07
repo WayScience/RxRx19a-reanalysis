@@ -22,7 +22,7 @@ from pathlib import Path
 
 DEFAULT_N_SAMPLES = 12
 
-_TEMPLATE = '''# %% [markdown]
+_TEMPLATE = """# %% [markdown]
 # # Crop spot check -- {run_dir}
 #
 # Human visual QC (plan.md section 16 / 27): a small, seeded-random sample
@@ -100,7 +100,7 @@ cdf = CytoDataFrame(
     display_options={{"render_whole_image": True, "width": 150, "height": 150}},
 )
 cdf
-'''
+"""
 
 
 def notebook_source(

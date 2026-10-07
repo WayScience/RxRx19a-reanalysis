@@ -197,7 +197,7 @@ def cellprofiler_version_command(
     return ["docker", "run", "--rm", container_image, "--version"]
 
 
-def cellprofiler_command(  # noqa: PLR0913
+def cellprofiler_command(  # noqa: PLR0913, PLR0917
     images_dir: Path,
     output_dir: Path,
     pipeline_path: Path = CELLPROFILER_PIPELINE,
@@ -324,7 +324,7 @@ def collect_cellprofiler_outputs(output_dir: Path) -> tuple[Path | None, list[Pa
     return sqlite_path, mask_paths
 
 
-def run_cellprofiler_shard(  # noqa: PLR0913
+def run_cellprofiler_shard(  # noqa: PLR0913, PLR0917
     shard: ImageSetShard,
     source_root: Path,
     scratch_root: Path,

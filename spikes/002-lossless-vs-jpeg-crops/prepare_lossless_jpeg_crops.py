@@ -35,9 +35,7 @@ sys.path.insert(0, "/scratch/alpine/dabu57888@xsede.org/rerx/ReRx/src")
 from rerx.crops import crop_and_mask_channel, decode_jpeg
 
 RUN_DIR = Path("/pl/active/koala/ReRx/runs/pilot-dev")
-SCRATCH_SHARD_ROOT = Path(
-    "/scratch/alpine/dabu57888@xsede.org/rerx/pilot-dev"
-)
+SCRATCH_SHARD_ROOT = Path("/scratch/alpine/dabu57888@xsede.org/rerx/pilot-dev")
 OUT_DIR = RUN_DIR / "baseline" / "spike002_lossless_vs_jpeg"
 N_SITES = 8
 SHARD_ID = sys.argv[1] if len(sys.argv) > 1 else "HRCE-1-Plate25-0000"

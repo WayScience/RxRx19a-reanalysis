@@ -424,7 +424,7 @@ def write_morphem_profiles(
     return profiles, dest
 
 
-def embed_shard(  # noqa: PLR0913
+def embed_shard(  # noqa: PLR0913, PLR0917
     crops: pd.DataFrame,
     shard_id: str,
     dest: Path,

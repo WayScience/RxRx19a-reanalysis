@@ -96,9 +96,7 @@ class RunSummary:
                 p.n_cells_flagged_outlier for p in self.plates
             ),
             "cells_normalized": sum(p.n_cells_normalized for p in self.plates),
-            "buscar_scored": sum(
-                1 for p in self.plates if p.buscar_status == "scored"
-            ),
+            "buscar_scored": sum(1 for p in self.plates if p.buscar_status == "scored"),
             "buscar_skipped": sum(
                 1 for p in self.plates if p.buscar_status == "skipped"
             ),

@@ -33,6 +33,7 @@ from rerx.fuse import fuse_features, fusion_metadata
 from rerx.pycytominer import flag_outliers
 
 MORPH_PREFIXES = ("Cells_", "Cytoplasm_", "Nuclei_")
+SACCT_FIELD_COUNT = 4
 
 
 def _to_secs(elapsed: str) -> int:
@@ -59,14 +60,14 @@ def slurm_stage_timing(sacct_lines: list[str]) -> dict:
     """Aggregate `sacct -X -P` rows (JobID|JobName|Elapsed|State) by
     Nextflow process name (the ALL-CAPS token after ``nf-``)."""
     stages: dict[str, list[tuple[int, str]]] = {}
-    for line in sacct_lines:
-        line = line.strip()
+    for raw_line in sacct_lines:
+        line = raw_line.strip()
         if not line or line.startswith("JobID"):
             continue
         parts = line.split("|")
-        if len(parts) < 4:
+        if len(parts) < SACCT_FIELD_COUNT:
             continue
-        _jobid, name, elapsed, state = parts[:4]
+        _jobid, name, elapsed, state = parts[:SACCT_FIELD_COUNT]
         m = re.match(r"nf-([A-Z]+)_", name)
         stage = m.group(1) if m else name
         stages.setdefault(stage, []).append((_to_secs(elapsed), state))
