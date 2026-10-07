@@ -14,6 +14,7 @@ from rerx.metadata import (
     DISEASE_CONDITION_UV,
     PILOT_NEGATIVE_CONTROL,
     PILOT_POSITIVE_CONTROL,
+    select_full_sites,
     select_pilot_wells,
 )
 
@@ -101,6 +102,37 @@ def _parse(df: pd.DataFrame) -> pd.DataFrame:
 @pytest.fixture
 def metadata() -> pd.DataFrame:
     return _parse(_synthetic_plate())
+
+
+def test_full_selection_keeps_every_cell_type_and_site(metadata: pd.DataFrame) -> None:
+    vero = metadata.iloc[[0]].copy()
+    vero["site_id"] = "Vero-1_Plate3_A01_s1"
+    vero["well_id"] = "Vero-1_Plate3_A01"
+    vero["experiment"] = "Vero-1"
+    vero["cell_type"] = "Vero"
+    vero["plate"] = "3"
+    vero["well"] = "A01"
+    all_sites = pd.concat([metadata, vero], ignore_index=True)
+    selected = select_full_sites(all_sites.iloc[::-1])
+    assert len(selected) == len(all_sites)
+    assert set(selected["cell_type"]) == {"HRCE", "Vero"}
+    assert selected["site_id"].is_unique
+    assert (
+        selected["site_id"].tolist()
+        == all_sites.sort_values(["experiment", "plate", "well", "site"])[
+            "site_id"
+        ].tolist()
+    )
+
+
+def test_full_selection_rejects_duplicate_sites(metadata: pd.DataFrame) -> None:
+    with pytest.raises(ValueError, match="duplicate site_id"):
+        select_full_sites(pd.concat([metadata, metadata.iloc[[0]]]))
+
+
+def test_full_selection_rejects_empty_metadata(metadata: pd.DataFrame) -> None:
+    with pytest.raises(ValueError, match="no image sets"):
+        select_full_sites(metadata.iloc[:0])
 
 
 class TestSelectPilotWells:
