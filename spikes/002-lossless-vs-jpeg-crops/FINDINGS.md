@@ -29,13 +29,13 @@ on matched cells.
 
 (2-site run, 270 cells; 8-site run below)
 
-| Metric                            | 2 sites (270 cells) |
-| --------------------------------- | ------------------- |
-| mean abs embedding difference     | 0.41 (feature std ~3) |
-| p99 abs difference                | 2.40                |
-| max abs difference                | 7.44                |
-| mean rel diff (vs feature std)    | 0.24                |
-| mean per-feature Pearson r (across cells) | 0.959        |
+| Metric                                    | 2 sites (270 cells)   |
+| ----------------------------------------- | --------------------- |
+| mean abs embedding difference             | 0.41 (feature std ~3) |
+| p99 abs difference                        | 2.40                  |
+| max abs difference                        | 7.44                  |
+| mean rel diff (vs feature std)            | 0.24                  |
+| mean per-feature Pearson r (across cells) | 0.959                 |
 
 Embeddings from JPEG-95 crops track lossless crops closely but not
 identically: per-feature Pearson ~0.96 across cells, typical difference

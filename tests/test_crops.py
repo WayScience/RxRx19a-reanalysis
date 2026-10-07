@@ -52,7 +52,7 @@ def test_crop_box_clamped_at_top_left_edge() -> None:
 
 
 def test_crop_box_clamped_at_bottom_right_edge() -> None:
-    left, top, right, bottom = crop_box(
+    _, _, right, bottom = crop_box(
         center_x=508,
         center_y=508,
         crop_size=20,

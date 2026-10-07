@@ -79,7 +79,7 @@ class PlateFinalizeResult:
     n_cells_flagged_outlier: int = 0
 
 
-def finalize_plate(  # noqa: PLR0913
+def finalize_plate(  # noqa: PLR0913, PLR0917
     raw_profiles: pd.DataFrame,
     site_metadata: pd.DataFrame,
     run_dir: Path,

@@ -277,7 +277,7 @@ class PlateBuscarResult:
     scores_path: Path
 
 
-def run_buscar_for_plate(  # noqa: PLR0913
+def run_buscar_for_plate(  # noqa: PLR0913, PLR0917
     plate_profiles: pd.DataFrame,
     dest_dir: Path,
     experiment: str,

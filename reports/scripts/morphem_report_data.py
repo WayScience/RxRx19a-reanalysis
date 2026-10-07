@@ -44,7 +44,7 @@ def site_medians(df: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
 def pca2(mat: np.ndarray, seed: int = 19) -> np.ndarray:
     x = mat - mat.mean(axis=0)
     # SVD on the transposed covariance-free matrix
-    u, s, vt = np.linalg.svd(x, full_matrices=False)
+    _, _, vt = np.linalg.svd(x, full_matrices=False)
     return x @ vt[:2].T
 
 

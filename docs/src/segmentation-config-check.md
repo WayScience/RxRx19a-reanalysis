@@ -37,7 +37,7 @@ downstream per-well statistic.
    condition x however many conditions is enough to span the plate's
    conditions without downloading the whole thing.
 
-2. **Download just those sites' images.**
+1. **Download just those sites' images.**
    `scripts/segmentation_cellpose_check.py download-images --sites ...`
    pulls the w1 (nuclei channel) PNGs for the sampled sites. For the
    CellProfiler side you additionally need all 5 channels per site (w1-w5)
@@ -45,9 +45,8 @@ downstream per-well statistic.
    the same way `metadata.ImageSetID.image_url()` builds URLs for each
    channel.
 
-3. **Run Cellpose as the reference.**
-   `scripts/segmentation_cellpose_check.py run-cellpose --images-dir ...
-   --out-dir ...` runs Cellpose's nuclei model (auto-estimated diameter)
+1. **Run Cellpose as the reference.**
+   `scripts/segmentation_cellpose_check.py run-cellpose --images-dir ... --out-dir ...` runs Cellpose's nuclei model (auto-estimated diameter)
    on the sampled w1 images. Cellpose doesn't use CellProfiler's
    threshold-based approach at all, so it's a reasonable independent
    reference -- not ground truth, but a different-enough method that
@@ -55,18 +54,17 @@ downstream per-well statistic.
    This step is slow (minutes per image on CPU); run it as a background
    process or a Slurm job, not inline.
 
-4. **Build threshold variants of the production pipeline.**
-   `rerx.segmentation_check.build_threshold_variant(cppipe_text, setting,
-   value)` takes the real pipeline's `.cppipe` text and swaps one setting
+1. **Build threshold variants of the production pipeline.**
+   `rerx.segmentation_check.build_threshold_variant(cppipe_text, setting, value)` takes the real pipeline's `.cppipe` text and swaps one setting
    value, leaving every other line untouched (verify with `diff` against
    the original -- it should differ by exactly one line). Build at least:
+
    - baseline (unchanged, whatever the pipeline currently uses)
    - `Thresholding method` -> `Robust Background`
    - `Threshold correction factor` -> a higher value, e.g. `1.3`
    - `Threshold strategy` -> `Adaptive`
 
-   CellProfiler's setting values are exact strings -- `"Robust
-   Background"` needs the space; `"RobustBackground"` crashes with
+   CellProfiler's setting values are exact strings -- `"Robust Background"` needs the space; `"RobustBackground"` crashes with
    "Invalid thresholding settings". When in doubt, check
    `cellprofiler/modules/threshold.py` in the CellProfiler install for the
    valid value list.
@@ -77,12 +75,12 @@ downstream per-well statistic.
    the measurement modules makes each run much faster since you only need
    object counts for this check, not full feature extraction.
 
-5. **Run each variant against the same sampled images**, same way the
+1. **Run each variant against the same sampled images**, same way the
    production pipeline runs (Apptainer on an Alpine compute node via a
    Slurm job -- bare SSH/login-shell `apptainer` calls fail, this has to
    be a real job).
 
-6. **Count objects per site per variant** from the saved label-mask
+1. **Count objects per site per variant** from the saved label-mask
    TIFFs (count distinct nonzero pixel values), and compare each variant
    against the Cellpose reference counts with
    `rerx.segmentation_check.compare_counts()`. It raises if the two
@@ -91,14 +89,14 @@ downstream per-well statistic.
    sample -- use the mean to pick a variant, and look at the biggest
    per-site misses to make sure it isn't just averaging out an anomaly.
 
-7. **Sanity-check object sizes, not just counts.** A variant that
+1. **Sanity-check object sizes, not just counts.** A variant that
    under-segments (merges real nuclei, or threshold too strict and drops
    them) can coincidentally produce a count close to the reference while
    being wrong in a different way. Check that the surviving objects'
    median size in the "fixed" wells is in the same range as the
    already-fine wells, not systematically smaller.
 
-8. **Check contrast, not just the pass/fail number.** Use
+1. **Check contrast, not just the pass/fail number.** Use
    `rerx.segmentation_check.image_contrast_stats()` /
    `ContrastStats.is_dim()` on each sampled image to confirm the pattern:
    does the winning variant's improvement track with per-image contrast
@@ -106,22 +104,22 @@ downstream per-well statistic.
    that's evidence the fix addresses a real brightness-driven failure
    mode rather than an artifact of this particular sample.
 
-9. **Apply and document.** If a variant clearly wins, apply that one
+1. **Apply and document.** If a variant clearly wins, apply that one
    setting change to the production `.cppipe` (not the whole pipeline --
    just the setting that was actually tested), note why in the module's
    `notes:` field, and record the before/after numbers in `plan.md`. Keep
    the baseline run as the fallback if a future dataset doesn't show this
    problem at all.
 
-10. **Re-validate on more plates before trusting it dataset-wide.** A
-    fix found on one plate's sample may not generalize -- different
-    plates can have different acquisition conditions. Re-run steps 1-8 (skip
-    step 4, reuse the already-built variant pipelines) on a couple of
-    other plates. If the pattern holds (contrast-correlated improvement,
-    no erratic blow-ups, no under-segmentation), it's dataset-wide. If a
-    plate shows a well as extreme as the original finding, repeat the
-    full Cellpose comparison on that plate specifically before trusting
-    counts from it.
+1. **Re-validate on more plates before trusting it dataset-wide.** A
+   fix found on one plate's sample may not generalize -- different
+   plates can have different acquisition conditions. Re-run steps 1-8 (skip
+   step 4, reuse the already-built variant pipelines) on a couple of
+   other plates. If the pattern holds (contrast-correlated improvement,
+   no erratic blow-ups, no under-segmentation), it's dataset-wide. If a
+   plate shows a well as extreme as the original finding, repeat the
+   full Cellpose comparison on that plate specifically before trusting
+   counts from it.
 
 ## What's reusable code vs. per-run orchestration
 

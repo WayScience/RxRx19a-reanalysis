@@ -12,6 +12,7 @@ repos:
     rev: "v2.29.4"
     hooks:
     -   id: pyproject-fmt
+        args: [ "--table-format", "long", "--no-generate-python-version-classifiers" ]
 -   repo: https://github.com/citation-file-format/cffconvert
     rev: b6045d78aac9e02b039703b030588d54d53262ac
     hooks:

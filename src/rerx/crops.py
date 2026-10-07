@@ -113,7 +113,7 @@ def crop_box(
     return clamped_left, clamped_top, clamped_right, clamped_bottom
 
 
-def crop_and_mask_channel(  # noqa: PLR0913
+def crop_and_mask_channel(  # noqa: PLR0913, PLR0917
     channel_image: np.ndarray,
     cell_mask: np.ndarray,
     object_number: int,

@@ -21,7 +21,7 @@ not in the host venv):
    writes TWO matched crop shards: the lossless pixels (PNG-encoded
    bytes, then decoded losslessly) and the JPEG-95 encoding of those
    same pixels.
-2. `embed_and_compare.py` (inside morphem.sif): embeds both shards with
+1. `embed_and_compare.py` (inside morphem.sif): embeds both shards with
    the baked-in MorphEm model and compares the two embedding matrices
    (per-feature and per-cell differences, correlation).
 
