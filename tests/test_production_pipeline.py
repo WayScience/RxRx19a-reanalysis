@@ -142,18 +142,28 @@ def test_partitioned_morphem_shards_are_written_once(
     assert len(list(root.glob("*/*/*.parquet"))) == 2
 
 
-def test_plate_finalize_and_complete_write_success_only_at_end(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    tasks = _load_tasks(monkeypatch, tmp_path)
-    plate_id = "HRCE-1-Plate1"
+def _stage_one_plate_fixture(
+    tasks, plate_id: str = "HRCE-1-Plate1"
+) -> tuple[str, Path, Path]:
+    """Write one plate plan, shard plan, and the four shard artifacts.
+
+    Returns (shard_id, morphem_parquet, cp_feature_selected_path).
+    """
     shard_id = f"{plate_id}-0000"
     plate_plan = tasks.RUN_DIR / "plate-plans" / f"{plate_id}.json"
     plate_plan.parent.mkdir(parents=True)
-    plate_plan.write_text(json.dumps({
-        "experiment": "HRCE-1", "plate": "1", "shard_ids": [shard_id],
-        "sites": [{"experiment": "HRCE-1", "plate": "1", "well": "A01", "site": 1}],
-    }))
+    plate_plan.write_text(
+        json.dumps(
+            {
+                "experiment": "HRCE-1",
+                "plate": "1",
+                "shard_ids": [shard_id],
+                "sites": [
+                    {"experiment": "HRCE-1", "plate": "1", "well": "A01", "site": 1}
+                ],
+            }
+        )
+    )
     (tasks.RUN_DIR / "shards.json").write_text(json.dumps([{"shard_id": shard_id}]))
     cp = tasks.SCRATCH / tasks.RUN_ID / "cytotable" / f"{shard_id}.parquet"
     me = tasks.RUN_DIR / "profiles" / "morphem" / "raw" / f"{shard_id}.parquet"
@@ -161,43 +171,90 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
     sqlite = tasks.SCRATCH / tasks.RUN_ID / shard_id / "output" / "DefaultDB.sqlite"
     cp.parent.mkdir(parents=True)
     me.parent.mkdir(parents=True)
-    pd.DataFrame({"Metadata_cell_id": ["cell-1"],
-                  "Image_Metadata_Experiment": ["HRCE-1"],
-                  "Image_Metadata_Plate": ["1"],
-                  "Cells_AreaShape_Area": [1.0]}).to_parquet(cp)
-    pd.DataFrame({"Metadata_cell_id": ["cell-1"],
-                  "Metadata_experiment": ["HRCE-1"], "Metadata_plate": ["1"],
-                  "Morphem_c1_d0": [0.5]}).to_parquet(me)
+    pd.DataFrame(
+        {
+            "Metadata_cell_id": ["cell-1"],
+            "Image_Metadata_Experiment": ["HRCE-1"],
+            "Image_Metadata_Plate": ["1"],
+            "Cells_AreaShape_Area": [1.0],
+        }
+    ).to_parquet(cp)
+    pd.DataFrame(
+        {
+            "Metadata_cell_id": ["cell-1"],
+            "Metadata_experiment": ["HRCE-1"],
+            "Metadata_plate": ["1"],
+            "Morphem_c1_d0": [0.5],
+        }
+    ).to_parquet(me)
     for path in (crops, sqlite):
         path.parent.mkdir(parents=True)
         path.write_bytes(b"valid fixture placeholder")
-    monkeypatch.setattr(tasks, "_validate_run_streaming", lambda *_args, **_kwargs: {"passed": True})
+    selected = (
+        tasks.RUN_DIR
+        / "profiles"
+        / "cellprofiler"
+        / "feature_selected"
+        / "experiment=HRCE-1"
+        / "plate=1"
+        / "profiles.parquet"
+    )
+    return shard_id, me, selected
+
+
+def _fake_finalize_profile(tasks, profiler: str, selection: pd.DataFrame) -> Path:
+    """Write a one-cell normalized + feature-selected partition; return path."""
+    selected = pd.DataFrame(
+        {
+            "Metadata_cell_id": ["cell-1"],
+            "Metadata_Experiment": ["HRCE-1"],
+            "Metadata_Plate": ["1"],
+        }
+    )
+    part = tasks.RUN_DIR / "profiles" / profiler
+    for stage in ("normalized", "feature_selected"):
+        path = part / stage / "experiment=HRCE-1" / "plate=1" / "profiles.parquet"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        selected.to_parquet(path, index=False)
+    return (
+        part / "feature_selected" / "experiment=HRCE-1" / "plate=1" / "profiles.parquet"
+    )
+
+
+def test_plate_finalize_and_complete_write_success_only_at_end(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from rerx import catalog
+    from rerx.run_summary import PlateSummary
+
+    tasks = _load_tasks(monkeypatch, tmp_path)
+    plate_id = "HRCE-1-Plate1"
+    _shard_id, _me, _selected = _stage_one_plate_fixture(tasks, plate_id)
+    monkeypatch.setattr(
+        tasks, "_validate_run_streaming", lambda *_args, **_kwargs: {"passed": True}
+    )
 
     def fake_finalize(profiles, profiler, buscar, selection):
-        from rerx.run_summary import PlateSummary
-
         key, frame = next(profiles)
         assert key == ("HRCE-1", "1")
         assert len(frame) == 1
-        selected = frame.rename(columns={
-            "Image_Metadata_Experiment": "Metadata_Experiment",
-            "Image_Metadata_Plate": "Metadata_Plate",
-        })
-        path = (tasks.RUN_DIR / "profiles" / profiler / "feature_selected"
-                / "experiment=HRCE-1" / "plate=1" / "profiles.parquet")
-        path.parent.mkdir(parents=True)
-        selected.to_parquet(path, index=False)
-        normalized = tasks.RUN_DIR / "profiles" / profiler / "normalized" / "experiment=HRCE-1" / "plate=1" / "profiles.parquet"
-        normalized.parent.mkdir(parents=True, exist_ok=True)
-        selected.to_parquet(normalized, index=False)
-        return [PlateSummary(
-            experiment="HRCE-1", plate="1", profiler=profiler,
-            n_cells_input=1, n_cells_flagged_outlier=0, n_cells_normalized=1,
-            n_feature_selected_cols=len(selected.columns),
-            control_separation_passed=True, control_separation_skipped=False,
-            control_separation_median_effect_size=1.0, buscar_status="scored",
-            buscar_skipped_reason=None,
-        )]
+        _fake_finalize_profile(tasks, profiler, selection)
+        return [
+            PlateSummary(
+                experiment="HRCE-1",
+                plate="1",
+                profiler=profiler,
+                n_cells_input=1,
+                n_cells_flagged_outlier=0,
+                n_cells_normalized=1,
+                n_feature_selected_cols=1,
+                control_separation_passed=True,
+                control_separation_skipped=False,
+                control_separation_median_effect_size=1.0,
+                buscar_status="scored",
+                buscar_skipped_reason=None,
+            )
+        ]
 
     monkeypatch.setattr(tasks, "_finalize_profiles", fake_finalize)
     tasks.cmd_finalize_plate(plate_id)
@@ -208,32 +265,72 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
         catalog_path.parent.mkdir(parents=True, exist_ok=True)
         catalog_path.write_text("test catalog")
 
-    from rerx import catalog
     monkeypatch.setattr(catalog, "build_run_catalog", fake_catalog)
+    tasks.cmd_complete_full()
+    assert (tasks.RUN_DIR / "_SUCCESS").read_text() == tasks.RUN_ID + "\n"
+    summary = json.loads((tasks.RUN_DIR / "run_summary.json").read_text())
+    assert summary["totals"]["plates_finalized"] == 2
+
+
+def test_complete_full_rejects_missing_artifacts_and_unplanned_shards(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from rerx import catalog
+
+    tasks = _load_tasks(monkeypatch, tmp_path)
+    plate_id = "HRCE-1-Plate1"
+    shard_id, me, selected = _stage_one_plate_fixture(tasks, plate_id)
+    monkeypatch.setattr(
+        tasks, "_validate_run_streaming", lambda *_args, **_kwargs: {"passed": True}
+    )
+    from rerx.run_summary import PlateSummary
+
+    def fake_finalize(profiles, profiler, buscar, selection):
+        next(profiles)
+        _fake_finalize_profile(tasks, profiler, selection)
+        return [
+            PlateSummary(
+                experiment="HRCE-1",
+                plate="1",
+                profiler=profiler,
+                n_cells_input=1,
+                n_cells_flagged_outlier=0,
+                n_cells_normalized=1,
+                n_feature_selected_cols=1,
+                control_separation_passed=True,
+                control_separation_skipped=False,
+                control_separation_median_effect_size=1.0,
+                buscar_status="scored",
+                buscar_skipped_reason=None,
+            )
+        ]
+
+    monkeypatch.setattr(tasks, "_finalize_profiles", fake_finalize)
+    tasks.cmd_finalize_plate(plate_id)
+
+    def fake_catalog(*, run_root, catalog_path, data_path):
+        catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        catalog_path.write_text("test catalog")
+
+    monkeypatch.setattr(catalog, "build_run_catalog", fake_catalog)
+    # A missing morphem shard must block completion.
     me.unlink()
     with pytest.raises(ValueError, match="morphem"):
         tasks.cmd_complete_full()
     assert not (tasks.RUN_DIR / "_SUCCESS").exists()
     me.write_bytes(b"restored for completion check")
+    # A shard in shards.json that no plate plan covers must block completion.
     (tasks.RUN_DIR / "shards.json").write_text(
         json.dumps([{"shard_id": shard_id}, {"shard_id": f"{plate_id}-0001"}])
     )
     with pytest.raises(ValueError, match="plate plans omit"):
         tasks.cmd_complete_full()
     (tasks.RUN_DIR / "shards.json").write_text(json.dumps([{"shard_id": shard_id}]))
-    selected_path = (
-        tasks.RUN_DIR / "profiles" / "cellprofiler" / "feature_selected"
-        / "experiment=HRCE-1" / "plate=1" / "profiles.parquet"
-    )
-    selected_path.unlink()
+    # A deleted feature-selected profile must block completion.
+    selected.unlink()
     with pytest.raises(ValueError, match="missing cellprofiler feature_selected"):
         tasks.cmd_complete_full()
-    selected_path.write_bytes(b"restored for completion check")
-    tasks.cmd_complete_full()
-    assert (tasks.RUN_DIR / "_SUCCESS").read_text() == tasks.RUN_ID + "\n"
-    assert json.loads((tasks.RUN_DIR / "run_summary.json").read_text())["totals"][
-        "plates_finalized"
-    ] == 2
+    assert not (tasks.RUN_DIR / "_SUCCESS").exists()
 
 
 def test_full_plate_finalization_runs_real_analysis_on_small_fixture(
@@ -270,13 +367,23 @@ def test_full_plate_finalization_runs_real_analysis_on_small_fixture(
     plate_id, shard_id = "HRCE-1-Plate25", "HRCE-1-Plate25-0000"
     plan = tasks.RUN_DIR / "plate-plans" / f"{plate_id}.json"
     plan.parent.mkdir(parents=True)
-    plan.write_text(json.dumps({"experiment": "HRCE-1", "plate": "25",
-                                "shard_ids": [shard_id], "sites": meta.to_dict("records")}))
+    plan.write_text(
+        json.dumps(
+            {
+                "experiment": "HRCE-1",
+                "plate": "25",
+                "shard_ids": [shard_id],
+                "sites": meta.to_dict("records"),
+            }
+        )
+    )
     (tasks.RUN_DIR / "shards.json").write_text(json.dumps([{"shard_id": shard_id}]))
     cp_path = tasks.SCRATCH / tasks.RUN_ID / "cytotable" / f"{shard_id}.parquet"
     me_path = tasks.RUN_DIR / "profiles" / "morphem" / "raw" / f"{shard_id}.parquet"
     crop_path = tasks.RUN_DIR / "crops" / "cells" / f"{shard_id}.parquet"
-    sqlite_path = tasks.SCRATCH / tasks.RUN_ID / shard_id / "output" / "DefaultDB.sqlite"
+    sqlite_path = (
+        tasks.SCRATCH / tasks.RUN_ID / shard_id / "output" / "DefaultDB.sqlite"
+    )
     for path in (cp_path, me_path, crop_path, sqlite_path):
         path.parent.mkdir(parents=True, exist_ok=True)
     cp.to_parquet(cp_path, index=False)
@@ -295,12 +402,19 @@ def test_full_plate_finalization_runs_real_analysis_on_small_fixture(
 
     tasks.cmd_finalize_plate(plate_id)
     fused = pd.read_parquet(
-        tasks.RUN_DIR / "profiles" / "fused" / "feature_selected"
-        / "experiment=HRCE-1" / "plate=25" / "profiles.parquet"
+        tasks.RUN_DIR
+        / "profiles"
+        / "fused"
+        / "feature_selected"
+        / "experiment=HRCE-1"
+        / "plate=25"
+        / "profiles.parquet"
     )
     assert len(fused) == cells
     assert "Metadata_cell_id" in fused.columns
-    summary = json.loads((tasks.RUN_DIR / "qc" / "plates" / f"{plate_id}.json").read_text())
+    summary = json.loads(
+        (tasks.RUN_DIR / "qc" / "plates" / f"{plate_id}.json").read_text()
+    )
     assert {p["profiler"] for p in summary["plates"]} == {"cellprofiler", "morphem"}
     assert summary["fusion"]["rows"] == cells
     tasks.cmd_complete_full()
