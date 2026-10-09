@@ -303,6 +303,23 @@ def _pilot_plate_scan(metadata: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def select_full_sites(metadata: pd.DataFrame) -> pd.DataFrame:
+    """Select every RxRx19a image set for the full feature dataset.
+
+    Keep both HRCE and Vero sites. Reject duplicate identifiers so a
+    full run cannot silently process the same site twice.
+    """
+    if metadata.empty:
+        raise ValueError("no image sets in full metadata")
+    if bool(metadata["site_id"].isna().any()) or bool(
+        metadata["site_id"].duplicated().any()
+    ):
+        raise ValueError("duplicate site_id or missing site_id in full metadata")
+    return metadata.sort_values(["experiment", "plate", "well", "site"]).reset_index(
+        drop=True
+    )
+
+
 def select_pilot_wells(  # noqa: C901, PLR0915
     metadata: pd.DataFrame,
     cell_type: str = "HRCE",

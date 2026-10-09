@@ -153,6 +153,19 @@ pre-commit run --all-files && pytest
 jupyter.shell = """
 jupyter lab
 """
+# Alpine launchers (see scripts/alpine_launch.sh and README.md "Full run
+# on Alpine"). Both require RERX_ROOT and RERX_PETA_ROOT already exported;
+# RERX_SCOPE is pinned here so a pilot run can't accidentally launch full
+# scope, or vice versa. `run_full` only fills RERX_RUN_ID when the caller
+# hasn't set one, so a deliberate resume (same RERX_RUN_ID) still works.
+run_pilot.shell = """
+RERX_SCOPE=pilot bash scripts/alpine_launch.sh
+"""
+run_full.shell = """
+RERX_SCOPE=full \
+RERX_RUN_ID="${RERX_RUN_ID:-rxrx19a-full-$(date -u +%Y%m%dT%H%M%SZ)-g$(git rev-parse --short=7 HEAD)}" \
+bash scripts/alpine_launch.sh
+"""
 
 [tool.jupytext]
 formats = "ipynb,py:light"

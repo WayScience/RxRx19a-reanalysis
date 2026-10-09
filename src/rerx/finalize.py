@@ -77,6 +77,24 @@ class PlateFinalizeResult:
     buscar: PlateBuscarResult | None
     buscar_skipped_reason: str | None
     n_cells_flagged_outlier: int = 0
+    n_cells_normalized: int = 0
+    n_cells_feature_selected: int = 0
+    n_feature_selected_cols: int = 0
+
+    def __post_init__(self) -> None:
+        # keep_frames=True callers never set the count fields, so derive
+        # them from the frames; keep_frames=False callers get the real
+        # counts (frames are empty by design) and keep them.
+        if self.n_cells_normalized == 0 and len(self.normalized) > 0:
+            object.__setattr__(self, "n_cells_normalized", len(self.normalized))
+        if self.n_cells_feature_selected == 0 and len(self.feature_selected) > 0:
+            object.__setattr__(
+                self, "n_cells_feature_selected", len(self.feature_selected)
+            )
+        if self.n_feature_selected_cols == 0 and len(self.feature_selected.columns) > 0:
+            object.__setattr__(
+                self, "n_feature_selected_cols", self.feature_selected.shape[1]
+            )
 
 
 def finalize_plate(  # noqa: PLR0913, PLR0917
@@ -88,6 +106,7 @@ def finalize_plate(  # noqa: PLR0913, PLR0917
     buscar_config: BuscarConfig | None = None,
     run_buscar: bool = True,
     profiler: str = "cellprofiler",
+    keep_frames: bool = True,
 ) -> PlateFinalizeResult:
     """
     Run the full per-plate finalize batch: annotate through buscar.
@@ -119,6 +138,12 @@ def finalize_plate(  # noqa: PLR0913, PLR0917
         Feature source sub-tree: ``"cellprofiler"`` or ``"morphem"``.
         Selects the output paths (and the buscar feature pool comes
         from the profiles themselves either way).
+    keep_frames : bool
+        When ``True`` (default, for tests and interactive use) the
+        result carries the annotated/normalized/feature_selected
+        frames. When ``False`` (production, full-scale plates) the
+        intermediate frames are freed as soon as their counts are
+        recorded so peak memory stays near one frame instead of six.
 
     Returns
     -------
@@ -139,11 +164,19 @@ def finalize_plate(  # noqa: PLR0913, PLR0917
     flagged = _flag_outliers(annotated)
     filtered = _drop_flagged_outliers(flagged)
     n_cells_flagged_outlier = n_before_qc - len(filtered)
+    if not keep_frames:
+        # A full-scale plate can need tens of GB per frame; the flag and
+        # filter outputs duplicate the annotated frame, so drop the
+        # intermediates as soon as their counts are recorded.
+        del flagged
+        annotated = pd.DataFrame()
 
     normalized_path = (
         run_dir / "profiles" / profiler / "normalized" / part_dir / "profiles.parquet"
     )
     normalized = _normalize_profiles(filtered, normalized_path)
+    if not keep_frames:
+        del filtered
 
     feature_selected_path = (
         run_dir
@@ -190,6 +223,20 @@ def finalize_plate(  # noqa: PLR0913, PLR0917
             # crash the whole finalize run.
             buscar_skipped_reason = f"buscar raised {exc.__class__.__name__}: {exc}"
 
+    if not keep_frames:
+        # buscar and the QC gate are the last in-memory consumers of
+        # the normalized frame; capture the counts first, then free both
+        # heavy frames so the caller's peak is one frame.
+        n_cells_normalized = len(normalized)
+        n_cells_feature_selected = len(feature_selected)
+        n_feature_selected_cols = feature_selected.shape[1]
+        normalized = pd.DataFrame()
+        feature_selected = pd.DataFrame()
+    else:
+        n_cells_normalized = len(normalized)
+        n_cells_feature_selected = len(feature_selected)
+        n_feature_selected_cols = feature_selected.shape[1]
+
     return PlateFinalizeResult(
         experiment=experiment,
         plate=plate,
@@ -202,4 +249,7 @@ def finalize_plate(  # noqa: PLR0913, PLR0917
         buscar=buscar_result,
         buscar_skipped_reason=buscar_skipped_reason,
         n_cells_flagged_outlier=n_cells_flagged_outlier,
+        n_cells_normalized=n_cells_normalized,
+        n_cells_feature_selected=n_cells_feature_selected,
+        n_feature_selected_cols=n_feature_selected_cols,
     )

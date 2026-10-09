@@ -101,9 +101,50 @@ This has three effects on the code:
 - `rerx.finalize.finalize_plate` runs annotate, normalize,
   feature-select, the control-separation QC gate, and buscar for one
   plate. It never holds more than one plate's cells in memory.
-- A full multi-plate run (thousands of plates) processes plate by
-  plate. Memory use stays flat as the run scales, instead of growing
-  with the whole dataset.
+- A full run processes plates in separate Slurm tasks. The final task
+  checks every plate before it publishes the catalog and `_SUCCESS`.
+
+The local full selection from RxRx19a metadata contains 305,520 sites
+across 57 plates. With 24 sites per shard, it plans 12,768 shards.
+
+### Full run on Alpine (after downtime)
+
+The full workflow is prepared but has not run on Alpine. Before launch,
+check that compute nodes can reach the chosen Active PetaLibrary path and
+that the allocation has enough space. Use a clean checkout at the commit
+named in the run ID. Run the launcher on Persistence1 inside `tmux`:
+
+```bash
+module load nextflow/25.10.2
+export RERX_ROOT=<scratch-root>
+export RERX_PETA_ROOT=<active-petalibrary-root>
+export SLURM_ACCOUNT=<allocation>
+uv run poe run_full
+```
+
+`uv run poe run_full` pins `RERX_SCOPE=full` and, unless you already set
+`RERX_RUN_ID` yourself (to resume an existing run), generates a fresh
+timestamped `rxrx19a-full-<UTC>-g<sha>` ID. Use `uv run poe run_pilot` the
+same way for a pilot run; it pins `RERX_SCOPE=pilot`. Both wrap
+`scripts/alpine_launch.sh` (see `pyproject.toml`'s `[tool.poe.tasks]`),
+so scope can't be set to the wrong value by a stale environment
+variable.
+
+`RERX_ROOT/ReRx` must contain this checkout. The launcher writes run
+outputs to `RERX_PETA_ROOT/runs/RERX_RUN_ID`. It keeps task work in
+scratch. It will not reuse a completed run ID. Set `RERX_RESUME=1` only
+to restart an incomplete run with the same inputs and code.
+
+The full run downloads five images per site in bounded shard tasks.
+It finalizes CellProfiler and MorphEm profiles, runs buscar per plate,
+and joins each cell's two profiles. It publishes a DuckLake catalog only
+after every planned shard and plate passes validation. The Recursion
+baseline and projection commands remain pilot-only; this full workflow
+does not run those comparisons.
+
+If the full run stops, check its Slurm and Nextflow logs before resuming.
+The local tests and workflow preview do not prove that a full Alpine run
+will finish within the current time and storage limits.
 
 If a future project has a different batching unit (for example, per
 96-well plate barcode, or per acquisition day), replace

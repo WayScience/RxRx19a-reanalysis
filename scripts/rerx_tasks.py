@@ -1,29 +1,32 @@
 #!/usr/bin/env python
-"""Alpine pilot task driver.
+"""Alpine pilot and full-dataset task driver.
 
-One CLI entry point per pipeline stage, wrapping the tested rerx library
-functions (the proven sequence lives in tests/test_pilot_e2e.py). The
-Nextflow workflow and the launcher call these subcommands so the
-orchestration stays thin and the logic stays in the library.
+One command per pipeline stage wraps the tested rerx library functions.
+The full workflow downloads image shards and finalizes plates in parallel.
+The pilot retains its single-finalize path and Recursion comparisons.
 
 Environment (set by scripts/alpine_launch.sh / nextflow.config):
     RERX_REPO       repo checkout (src/ + pipelines/ inside)
-    RERX_RUN_DIR    durable run directory (/pl/active/koala/ReRx/runs/<id>)
-    RERX_SCRATCH    scratch root (/scratch/alpine/<user>/rerx)
+    RERX_RUN_DIR    durable run directory on Active PetaLibrary
+    RERX_SCRATCH    scratch root
     RERX_SOURCE     staged source images root
     RERX_SIF        apptainer image for CellProfiler
-    RERX_RUN_ID     run id (rxrx19a-pilot-...-g<sha>)
+    RERX_RUN_ID     run id
+    RERX_SCOPE      pilot or full
 
 Subcommands:
-    prepare             download metadata, select pilot wells, plan shards
-    download            fetch the pilot's PNGs into RERX_SOURCE
+    prepare             download metadata, select sites, plan shards and plates
+    download [sid]      fetch five PNGs per site (one shard for full runs)
     cellprofiler <sid>  stage + run CellProfiler for one shard
     cytotable <sid>     SQLite -> joined single-cell Parquet for one shard
     crops <sid>         per-cell JPEG crops for one shard
     morphem <sid>       MorphEm-embed one crop shard (inside morphem.sif)
-    finalize            merge, annotate/normalize/select, validate, catalog
+    finalize            pilot finalize, fuse, and validate
+    finalize-plate <id> full-run per-plate finalize, fuse, and validate
+    complete-full       aggregate full-run plates and publish
     recursion-buscar    buscar-score Recursion's published site embeddings
     projection          Recursion-style on/off-perturbation scores per plate
+    publish             publish the pilot after baseline and projection
 """
 
 from __future__ import annotations
@@ -76,6 +79,20 @@ def _load_shards() -> list[dict]:
         return json.load(fh)
 
 
+def _load_shard_rows(shard_id: str) -> list[dict]:
+    """Read only the sites needed by one worker, not the whole selection."""
+    path = RUN_DIR / "shard-plans" / f"{shard_id}.json"
+    if path.is_file():
+        with path.open() as fh:
+            return json.load(fh)
+    if os.environ.get("RERX_SCOPE", "pilot") == "full":
+        raise FileNotFoundError(f"missing full-run shard plan: {path}")
+    # Older pilot runs predate the per-shard plans.
+    shard = {s["shard_id"]: s for s in _load_shards()}[shard_id]
+    by_site = {row["site_id"]: row for row in _load_selection()}
+    return [by_site[site_id] for site_id in shard["site_ids"]]
+
+
 def _task_dir(shard_id: str) -> Path:
     return SCRATCH / RUN_ID / shard_id
 
@@ -85,14 +102,21 @@ def _pipeline_path() -> Path:
 
 
 def cmd_prepare() -> None:
-    """Download metadata, select pilot wells, write selection + shard plan."""
+    """Download metadata and plan pilot or full image-set shards."""
     from rerx.cellprofiler import shard_image_sets
     from rerx.metadata import (
         ImageSetID,
         download_metadata,
         parse_metadata,
+        select_full_sites,
         select_pilot_wells,
     )
+
+    scope = os.environ.get("RERX_SCOPE", "pilot")
+    if scope not in {"pilot", "full"}:
+        raise ValueError(f"RERX_SCOPE must be pilot or full, got {scope!r}")
+    if scope == "full" and not RUN_ID.startswith("rxrx19a-full-"):
+        raise ValueError("full run ID must start with rxrx19a-full-")
 
     inputs = RUN_DIR / "inputs"
     inputs.mkdir(parents=True, exist_ok=True)
@@ -105,13 +129,18 @@ def cmd_prepare() -> None:
     (RUN_DIR / "metadata").mkdir(parents=True, exist_ok=True)
     metadata.to_parquet(RUN_DIR / "metadata" / "rxrx19a.parquet", index=False)
 
-    # RERX_PILOT_SCALE multiplies every pilot arm size (1 = base pilot).
-    arm_scale = int(os.environ.get("RERX_PILOT_SCALE", "1"))
-    pilot = select_pilot_wells(
-        metadata, cell_type="HRCE", max_wells=42 * arm_scale, arm_scale=arm_scale
-    )
-    _log(f"pilot selection: {len(pilot)} site rows (arm_scale={arm_scale})")
-    pilot.to_json(RUN_DIR / "selection.json", orient="records")
+    if scope == "full":
+        selected = select_full_sites(metadata)
+        _log(f"full selection: {len(selected)} site rows")
+    else:
+        # RERX_PILOT_SCALE multiplies every pilot arm size (1 = base pilot).
+        arm_scale = int(os.environ.get("RERX_PILOT_SCALE", "1"))
+        selected = select_pilot_wells(
+            metadata, cell_type="HRCE", max_wells=42 * arm_scale, arm_scale=arm_scale
+        )
+        _log(f"pilot selection: {len(selected)} site rows (arm_scale={arm_scale})")
+    selected.to_json(RUN_DIR / "selection.json", orient="records")
+    site_rows = {row["site_id"]: row for row in selected.to_dict("records")}
 
     image_sets = [
         ImageSetID(
@@ -120,22 +149,52 @@ def cmd_prepare() -> None:
             well=str(r["well"]),
             site=int(r["site"]),
         )
-        for r in pilot.to_dict("records")
+        for r in site_rows.values()
     ]
     shards = shard_image_sets(image_sets, shard_size=SHARD_SIZE)
     plan = [
         {"shard_id": s.shard_id, "site_ids": [ids.site_id for ids in s.image_sets]}
         for s in shards
     ]
+    shard_dir = RUN_DIR / "shard-plans"
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    plate_shards: dict[tuple[str, str], list[str]] = {}
+    for shard in plan:
+        rows = [site_rows[site_id] for site_id in shard["site_ids"]]
+        (shard_dir / f"{shard['shard_id']}.json").write_text(json.dumps(rows))
+        key = (str(rows[0]["experiment"]), str(rows[0]["plate"]))
+        plate_shards.setdefault(key, []).append(shard["shard_id"])
+    plate_dir = RUN_DIR / "plate-plans"
+    plate_dir.mkdir(parents=True, exist_ok=True)
+    for _, group in selected.groupby(["experiment", "plate"]):
+        experiment = str(group["experiment"].iloc[0])
+        plate = str(group["plate"].iloc[0])
+        plate_id = f"{experiment}-Plate{plate}"
+        payload = {
+            "experiment": str(experiment),
+            "plate": str(plate),
+            "shard_ids": plate_shards[(str(experiment), str(plate))],
+            "sites": group.to_dict("records"),
+        }
+        (plate_dir / f"{plate_id}.json").write_text(json.dumps(payload))
+    (RUN_DIR / "shard_plate_counts.tsv").write_text(
+        "".join(
+            f"{shard_id}\t{experiment}-Plate{plate}\t{len(shard_ids)}\n"
+            for (experiment, plate), shard_ids in plate_shards.items()
+            for shard_id in shard_ids
+        )
+    )
     _shards_path().write_text(json.dumps(plan, indent=2))
     _log(f"wrote {len(plan)} shards to {_shards_path()}")
 
 
-def cmd_download() -> None:
-    """Fetch every pilot site's five channel PNGs from GCS into RERX_SOURCE."""
+def cmd_download(shard_id: str | None = None) -> None:
+    """Stage one shard's PNGs, or all pilot PNGs for older workflows."""
     from rerx.metadata import ImageSetID
 
-    rows = _load_selection()
+    if shard_id is None and os.environ.get("RERX_SCOPE", "pilot") == "full":
+        raise ValueError("full runs must download one shard at a time")
+    rows = _load_shard_rows(shard_id) if shard_id else _load_selection()
     jobs: list[tuple[str, Path]] = []
     for r in rows:
         ids = ImageSetID(
@@ -179,16 +238,15 @@ def cmd_cellprofiler(shard_id: str) -> None:
     from rerx.cellprofiler import ImageSetShard, run_cellprofiler_shard
     from rerx.metadata import ImageSetID
 
-    shard_plan = {s["shard_id"]: s for s in _load_shards()}[shard_id]
-    by_site = {r["site_id"]: r for r in _load_selection()}
+    rows = _load_shard_rows(shard_id)
     image_sets = [
         ImageSetID(
-            experiment=str(by_site[sid]["experiment"]),
-            plate=str(by_site[sid]["plate"]),
-            well=str(by_site[sid]["well"]),
-            site=int(by_site[sid]["site"]),
+            experiment=str(r["experiment"]),
+            plate=str(r["plate"]),
+            well=str(r["well"]),
+            site=int(r["site"]),
         )
-        for sid in shard_plan["site_ids"]
+        for r in rows
     ]
     shard = ImageSetShard(shard_id=shard_id, image_sets=image_sets)
     result = run_cellprofiler_shard(
@@ -273,11 +331,8 @@ def cmd_crops(shard_id: str) -> None:
         site = int(stem.split("_")[1][1:])
         mask_by_site[(well, site)] = p
 
-    shard_plan = {s["shard_id"]: s for s in _load_shards()}[shard_id]
-    by_site = {r["site_id"]: r for r in _load_selection()}
     frames = []
-    for sid in shard_plan["site_ids"]:
-        r = by_site[sid]
+    for r in _load_shard_rows(shard_id):
         ids = ImageSetID(
             experiment=str(r["experiment"]),
             plate=str(r["plate"]),
@@ -330,6 +385,7 @@ def _finalize_profiles(
     profiles: "pd.DataFrame | Iterable[tuple[tuple[str, str], pd.DataFrame]]",
     profiler: str,
     buscar: bool,
+    selection: "pd.DataFrame | None" = None,
 ) -> list["PlateSummary"]:
     """Annotate/normalize/select (and buscar) per plate for one profiler.
 
@@ -347,7 +403,9 @@ def _finalize_profiles(
     from rerx.finalize import finalize_plate
     from rerx.run_summary import PlateSummary
 
-    pilot = pd.DataFrame(_load_selection())
+    site_metadata: pd.DataFrame = (
+        selection if selection is not None else pd.DataFrame(_load_selection())
+    )
     normalized_rows = 0
     selected_cols = None
     plates = 0
@@ -362,9 +420,9 @@ def _finalize_profiles(
         else plate_partitions(profiles)  # type: ignore[arg-type]
     )
     for (experiment, plate), plate_profiles in pairs:
-        plate_metadata = pilot[
-            (pilot["experiment"].astype(str) == experiment)
-            & (pilot["plate"].astype(str) == plate)
+        plate_metadata = site_metadata[
+            (site_metadata["experiment"].astype(str) == experiment)
+            & (site_metadata["plate"].astype(str) == plate)
         ]
         n_cells_input = len(plate_profiles)
         result = finalize_plate(
@@ -375,12 +433,13 @@ def _finalize_profiles(
             plate=plate,
             profiler=profiler,
             run_buscar=buscar,
+            keep_frames=False,
         )
         # finalize_plate already wrote the normalized and
         # feature-selected parquets for this plate; keep only counts
         # (not the frames) so memory stays per-plate.
-        normalized_rows += len(result.normalized)
-        selected_cols = result.feature_selected.shape[1]
+        normalized_rows += result.n_cells_normalized
+        selected_cols = result.n_feature_selected_cols
         plates += 1
         cs = result.control_separation
         plate_summaries.append(
@@ -390,8 +449,8 @@ def _finalize_profiles(
                 profiler=profiler,
                 n_cells_input=n_cells_input,
                 n_cells_flagged_outlier=result.n_cells_flagged_outlier,
-                n_cells_normalized=len(result.normalized),
-                n_feature_selected_cols=result.feature_selected.shape[1],
+                n_cells_normalized=result.n_cells_normalized,
+                n_feature_selected_cols=result.n_feature_selected_cols,
                 control_separation_passed=cs.passed if cs else None,
                 control_separation_skipped=cs.skipped if cs else None,
                 control_separation_median_effect_size=(
@@ -667,38 +726,155 @@ def cmd_projection() -> None:
             del normed, agg, scores
 
 
-def _append_partitioned_profiles(frame: "pd.DataFrame", dest_root: Path) -> None:
-    """Append one frame's rows into the partitioned Parquet layout.
+def _write_partitioned_shard(
+    frame: "pd.DataFrame", dest_root: Path, shard_id: str
+) -> None:
+    """Write immutable per-shard files in the plate's partition.
 
-    Streaming helper for raw shards that need regrouping into the
-    ``experiment=<e>/plate=<p>/`` layout (e.g. the MorphEm raw
-    shards, which are per-crop-shard, not per-plate). Reads one
-    caller-provided frame at a time; partitions accumulate on disk
-    over multiple appends, so memory stays one-frame.
+    The plate reader combines these once. Never reread and rewrite a
+    growing plate file after each shard.
     """
-    import pandas as pd
-
     from rerx.cytotable import plate_partitions
 
     for (experiment, plate), part in plate_partitions(frame):  # type: ignore[arg-type]
         part_dir = dest_root / f"experiment={experiment}" / f"plate={plate}"
         part_dir.mkdir(parents=True, exist_ok=True)
-        tmp_path = part_dir / "profiles.parquet.tmp"
-        final_path = part_dir / "profiles.parquet"
-        rows = part
-        if final_path.exists():
-            prior = pd.read_parquet(final_path)
-            rows = pd.concat([prior, part], ignore_index=True)
-            del prior
-        rows.to_parquet(tmp_path, index=False, compression="zstd")
+        tmp_path = part_dir / f"{shard_id}.parquet.tmp"
+        final_path = part_dir / f"{shard_id}.parquet"
+        part.to_parquet(tmp_path, index=False, compression="zstd")
         tmp_path.replace(final_path)
-        del rows
+
+
+def _verify_planned_shards(
+    expected: set[str],
+    cytotable_paths: list[Path],
+    crop_paths: list[Path],
+    morphem_paths: list[Path],
+    sqlite_paths: list[Path],
+) -> None:
+    """Refuse completion if any planned shard lacks a nonempty artifact."""
+    groups = {
+        "cytotable": {path.stem: path for path in cytotable_paths},
+        "crops": {path.stem: path for path in crop_paths},
+        "morphem": {path.stem: path for path in morphem_paths},
+        "sqlite": {path.parent.parent.name: path for path in sqlite_paths},
+    }
+    if not expected:
+        raise ValueError("no planned shards")
+    for name, paths in groups.items():
+        missing = expected - paths.keys()
+        extra = paths.keys() - expected
+        if missing or extra:
+            raise ValueError(
+                f"{name}: missing {len(missing)} planned shards {sorted(missing)[:3]}; "
+                f"unexpected {len(extra)} shards {sorted(extra)[:3]}"
+            )
+        empty = [
+            path
+            for path in paths.values()
+            if not path.is_file() or not path.stat().st_size
+        ]
+        if empty:
+            raise ValueError(f"{name}: empty or absent artifacts: {empty[:3]}")
+
+
+def cmd_finalize_plate(plate_id: str) -> None:
+    """Validate, finalize, and fuse one complete plate in a Slurm task."""
+    import pandas as pd
+
+    from rerx.fuse import fuse_features, fusion_metadata, write_fused_profiles
+
+    plan_path = RUN_DIR / "plate-plans" / f"{plate_id}.json"
+    with plan_path.open() as fh:
+        plan = json.load(fh)
+    experiment, plate = plan["experiment"], plan["plate"]
+    shard_ids = plan["shard_ids"]
+    cytotable = [SCRATCH / RUN_ID / "cytotable" / f"{sid}.parquet" for sid in shard_ids]
+    crops = [RUN_DIR / "crops" / "cells" / f"{sid}.parquet" for sid in shard_ids]
+    morphem = [
+        RUN_DIR / "profiles" / "morphem" / "raw" / f"{sid}.parquet" for sid in shard_ids
+    ]
+    sqlite = [_shard_sqlite(sid) for sid in shard_ids]
+    _verify_planned_shards(set(shard_ids), cytotable, crops, morphem, sqlite)
+    validation = _validate_run_streaming(
+        cytotable, sqlite, RUN_DIR / "crops" / "cells", crop_paths=crops
+    )
+    metadata = pd.DataFrame(plan["sites"])
+    key = (experiment, plate)
+    part = f"experiment={experiment}/plate={plate}"
+
+    cp_frame = pd.concat(
+        [pd.read_parquet(path) for path in cytotable], ignore_index=True
+    )
+    cp_raw = RUN_DIR / "profiles" / "cellprofiler" / "raw" / part / "profiles.parquet"
+    cp_raw.parent.mkdir(parents=True, exist_ok=True)
+    cp_frame.to_parquet(cp_raw, index=False, compression="zstd")
+    summaries = _finalize_profiles(
+        iter([(key, cp_frame)]), "cellprofiler", buscar=True, selection=metadata
+    )
+    del cp_frame
+
+    me_frame = pd.concat([pd.read_parquet(path) for path in morphem], ignore_index=True)
+    me_frame = me_frame.rename(
+        columns={
+            "Metadata_experiment": "Image_Metadata_Experiment",
+            "Metadata_plate": "Image_Metadata_Plate",
+            "Metadata_well": "Image_Metadata_Well",
+            "Metadata_site": "Image_Metadata_Site",
+        }
+    )
+    summaries += _finalize_profiles(
+        iter([(key, me_frame)]), "morphem", buscar=True, selection=metadata
+    )
+    del me_frame
+
+    cp_path = (
+        RUN_DIR
+        / "profiles"
+        / "cellprofiler"
+        / "feature_selected"
+        / part
+        / "profiles.parquet"
+    )
+    me_path = (
+        RUN_DIR
+        / "profiles"
+        / "morphem"
+        / "feature_selected"
+        / part
+        / "profiles.parquet"
+    )
+    cp_selected, me_selected = pd.read_parquet(cp_path), pd.read_parquet(me_path)
+    fused = fuse_features(cp_selected, me_selected)
+    written = write_fused_profiles(fused, RUN_DIR, write_sidecar=False)
+    if len(written) != 1:
+        raise ValueError(f"expected one fused partition for {plate_id}: {written}")
+    fusion = fusion_metadata(
+        fused, cp_rows=len(cp_selected), morphem_rows=len(me_selected)
+    )
+    summary_path = RUN_DIR / "qc" / "plates" / f"{plate_id}.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "plate_id": plate_id,
+                "shard_ids": shard_ids,
+                "validation": validation,
+                "plates": [summary.to_dict() for summary in summaries],
+                "fusion": fusion,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    _log(f"finalized {plate_id} -> {summary_path}")
 
 
 def _validate_run_streaming(
     shard_parquets: list[Path],
     sqlite_paths: list[Path],
     crop_dir: Path,
+    crop_paths: list[Path] | None = None,
 ) -> dict:
     """Run the run's validation checks one shard at a time.
 
@@ -727,7 +903,9 @@ def _validate_run_streaming(
     if not schema_check.consistent:
         raise SystemExit(f"shard schema mismatch: {schema_check.mismatches}")
 
-    crop_paths = sorted(crop_dir.glob("*.parquet"))
+    crop_paths = (
+        crop_paths if crop_paths is not None else sorted(crop_dir.glob("*.parquet"))
+    )
     pairs, unmatched = shard_parquet_pairs(crop_paths, shard_parquets)
     if unmatched:
         raise SystemExit(
@@ -766,6 +944,136 @@ def _validate_run_streaming(
     }
 
 
+def _verify_completed_plate(
+    plate_id: str, plan: dict, result: dict
+) -> list["PlateSummary"]:
+    """Check one completed plate's artifacts; return its plate summaries."""
+    from rerx.run_summary import PlateSummary
+
+    if set(result["shard_ids"]) != set(plan["shard_ids"]):
+        raise ValueError(f"incomplete shard set for {plate_id}")
+    profilers = {item["profiler"] for item in result["plates"]}
+    if not result["validation"]["passed"] or profilers != {"cellprofiler", "morphem"}:
+        raise ValueError(f"failed plate validation for {plate_id}")
+    part = f"experiment={plan['experiment']}/plate={plan['plate']}"
+    for profiler in ("cellprofiler", "morphem"):
+        for stage in ("normalized", "feature_selected"):
+            profile_path = (
+                RUN_DIR / "profiles" / profiler / stage / part / "profiles.parquet"
+            )
+            if not profile_path.is_file() or not profile_path.stat().st_size:
+                raise ValueError(f"missing {profiler} {stage} profile for {plate_id}")
+    cp_raw = RUN_DIR / "profiles" / "cellprofiler" / "raw" / part / "profiles.parquet"
+    if not cp_raw.is_file() or not cp_raw.stat().st_size:
+        raise ValueError(f"missing cellprofiler raw profile for {plate_id}")
+    fused_path = (
+        RUN_DIR / "profiles" / "fused" / "feature_selected" / part / "profiles.parquet"
+    )
+    if not fused_path.is_file() or not fused_path.stat().st_size:
+        raise ValueError(f"missing fused profile for {plate_id}")
+    return [PlateSummary(**item) for item in result["plates"]]
+
+
+def _accumulate_fusion(fusion: dict | None, plate_fusion: dict) -> dict:
+    """Fold one plate's fusion metadata into the running full-run totals."""
+    if fusion is None:
+        return plate_fusion.copy()
+    for field in (
+        "rows",
+        "cellprofiler_input_rows",
+        "morphem_input_rows",
+        "cellprofiler_rows_dropped",
+        "morphem_rows_dropped",
+    ):
+        fusion[field] += plate_fusion[field]
+    return fusion
+
+
+def cmd_complete_full() -> None:
+    """Aggregate every plate and mark a full run successful only when complete."""
+    from rerx.catalog import build_run_catalog
+    from rerx.fuse import write_fusion_sidecar
+    from rerx.run_summary import RunSummary, write_run_summary
+
+    plans = sorted((RUN_DIR / "plate-plans").glob("*.json"))
+    expected = {path.stem for path in plans}
+    observed = {path.stem for path in (RUN_DIR / "qc" / "plates").glob("*.json")}
+    if not expected or expected != observed:
+        raise ValueError(
+            f"full run has {len(expected)} planned plates but {len(observed)} "
+            f"completed plates; missing {sorted(expected - observed)[:3]}"
+        )
+    planned_shards = {
+        shard_id
+        for path in plans
+        for shard_id in json.loads(path.read_text())["shard_ids"]
+    }
+    expected_shards = {shard["shard_id"] for shard in _load_shards()}
+    if planned_shards != expected_shards:
+        raise ValueError(
+            f"plate plans omit {len(expected_shards - planned_shards)} shards "
+            f"from shards.json; unexpected {len(planned_shards - expected_shards)}"
+        )
+    _verify_planned_shards(
+        expected_shards,
+        sorted((SCRATCH / RUN_ID / "cytotable").glob("*.parquet")),
+        sorted((RUN_DIR / "crops" / "cells").glob("*.parquet")),
+        sorted((RUN_DIR / "profiles" / "morphem" / "raw").glob("*.parquet")),
+        sorted(SCRATCH.glob(f"{RUN_ID}/*/output/*.sqlite")),
+    )
+    summaries = []
+    fusion: dict | None = None
+    for plate_id in sorted(expected):
+        result = json.loads(
+            (RUN_DIR / "qc" / "plates" / f"{plate_id}.json").read_text()
+        )
+        plan = json.loads((RUN_DIR / "plate-plans" / f"{plate_id}.json").read_text())
+        summaries.extend(_verify_completed_plate(plate_id, plan, result))
+        fusion = _accumulate_fusion(fusion, result["fusion"])
+    assert fusion is not None
+    write_fusion_sidecar(RUN_DIR, fusion)
+    write_run_summary(
+        RunSummary(
+            run_id=RUN_ID,
+            plates=summaries,
+            validation={"passed": True, "plates_checked": len(expected)},
+        ),
+        RUN_DIR / "run_summary.json",
+    )
+    build_run_catalog(
+        run_root=RUN_DIR,
+        catalog_path=RUN_DIR / "catalog" / "run.ducklake",
+        data_path=RUN_DIR / "catalog" / "ducklake_data",
+    )
+    (RUN_DIR / "_SUCCESS").write_text(RUN_ID + "\n")
+    _log(f"full run complete: {len(expected)} plates -> {RUN_DIR}")
+
+
+def cmd_publish() -> None:
+    """Publish a pilot only after its baseline and projection finish."""
+    from rerx.catalog import build_run_catalog
+
+    if not (RUN_DIR / "run_summary.json").is_file():
+        raise FileNotFoundError("finalize must write run_summary.json before publish")
+    if not (
+        RUN_DIR
+        / "baseline"
+        / "recursion_site_embeddings"
+        / "recursion_site_embeddings.parquet"
+    ).is_file():
+        raise FileNotFoundError("Recursion baseline must complete before publish")
+    for profiler in ("cellprofiler", "morphem"):
+        if not list((RUN_DIR / "projection" / profiler).glob("**/scores.parquet")):
+            raise FileNotFoundError(f"missing {profiler} projection scores")
+    build_run_catalog(
+        run_root=RUN_DIR,
+        catalog_path=RUN_DIR / "catalog" / "run.ducklake",
+        data_path=RUN_DIR / "catalog" / "ducklake_data",
+    )
+    (RUN_DIR / "_SUCCESS").write_text(RUN_ID + "\n")
+    _log(f"run complete: {RUN_DIR}")
+
+
 def cmd_finalize() -> None:
     """Finalize (annotate/normalize/select/buscar), fuse, validate, catalog.
 
@@ -784,14 +1092,22 @@ def cmd_finalize() -> None:
     """
     import pandas as pd
 
-    from rerx.catalog import build_run_catalog
     from rerx.qc_notebook import build_crop_review_notebook
     from rerx.run_summary import RunSummary, write_run_summary
     from rerx.streaming import iter_partition_frames, iter_shard_partitions
 
     shard_parquets = sorted((SCRATCH / RUN_ID / "cytotable").glob("*.parquet"))
-    if not shard_parquets:
-        raise SystemExit(f"no shard parquets under {SCRATCH / RUN_ID / 'cytotable'}")
+    morphem_parquets = sorted(
+        (RUN_DIR / "profiles" / "morphem" / "raw").glob("*.parquet")
+    )
+    sqlite_paths = sorted(SCRATCH.glob(f"{RUN_ID}/*/output/*.sqlite"))
+    _verify_planned_shards(
+        {s["shard_id"] for s in _load_shards()},
+        shard_parquets,
+        sorted((RUN_DIR / "crops" / "cells").glob("*.parquet")),
+        morphem_parquets,
+        sqlite_paths,
+    )
 
     plate_summaries: list[PlateSummary] = []
 
@@ -831,10 +1147,7 @@ def cmd_finalize() -> None:
         # rename at this seam, one shard at a time.
         morphem_partitions = RUN_DIR / "profiles" / "morphem" / "raw_partitioned"
         if morphem_partitions.is_dir():
-            # Clear any prior attempt's partitions first:
-            # _append_partitioned_profiles merges onto whatever is
-            # already on disk, so a rerun without this would
-            # duplicate every row already partitioned last time.
+            # A retried finalize must not retain stale per-shard files.
             shutil.rmtree(morphem_partitions)
         for path in morphem_parquets:
             frame = pd.read_parquet(path).rename(
@@ -845,7 +1158,7 @@ def cmd_finalize() -> None:
                     "Metadata_site": "Image_Metadata_Site",
                 }
             )
-            _append_partitioned_profiles(frame, morphem_partitions)
+            _write_partitioned_shard(frame, morphem_partitions, path.stem)
         _log(f"morphem: partitioned {len(morphem_parquets)} raw shard(s)")
         plate_summaries += _finalize_profiles(
             iter_partition_frames(morphem_partitions),
@@ -894,27 +1207,26 @@ def cmd_finalize() -> None:
     except FileNotFoundError as exc:
         _log(f"crop spot-check notebook skipped: {exc}")
 
-    # 4. Catalog + success marker.
-    build_run_catalog(
-        run_root=RUN_DIR,
-        catalog_path=RUN_DIR / "catalog" / "run.ducklake",
-        data_path=RUN_DIR / "catalog" / "ducklake_data",
-    )
-    (RUN_DIR / "_SUCCESS").write_text(RUN_ID + "\n")
-    _log(f"run complete: {RUN_DIR}")
+    # Catalog and success marker are written by publish, after baseline
+    # and projection have finished successfully.
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="rerx-tasks")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("prepare")
-    sub.add_parser("download")
     for name in ("cellprofiler", "cytotable", "crops", "morphem"):
         p = sub.add_parser(name)
         p.add_argument("shard_id")
+    download = sub.add_parser("download")
+    download.add_argument("shard_id", nargs="?")
     sub.add_parser("finalize")
+    finalize_plate_cmd = sub.add_parser("finalize-plate")
+    finalize_plate_cmd.add_argument("plate_id")
+    sub.add_parser("complete-full")
     sub.add_parser("recursion-buscar")
     sub.add_parser("projection")
+    sub.add_parser("publish")
     args = parser.parse_args()
 
     # Dispatch table keeps main() under the complexity budget as
@@ -922,12 +1234,17 @@ def main() -> None:
     shard_commands = ("cellprofiler", "cytotable", "crops", "morphem")
     no_arg_commands = {
         "prepare": cmd_prepare,
-        "download": cmd_download,
         "finalize": cmd_finalize,
+        "complete-full": cmd_complete_full,
         "recursion-buscar": cmd_recursion_buscar,
         "projection": cmd_projection,
+        "publish": cmd_publish,
     }
-    if args.command in shard_commands:
+    if args.command == "download":
+        cmd_download(args.shard_id)
+    elif args.command == "finalize-plate":
+        cmd_finalize_plate(args.plate_id)
+    elif args.command in shard_commands:
         {
             "cellprofiler": cmd_cellprofiler,
             "cytotable": cmd_cytotable,

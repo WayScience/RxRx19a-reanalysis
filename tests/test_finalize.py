@@ -161,6 +161,34 @@ def test_finalize_plate_control_separation_flags_bad_plate(tmp_path: Path) -> No
     assert result.buscar_skipped_reason is not None
 
 
+def test_finalize_plate_keep_frames_false_frees_frames_but_keeps_counts(
+    tmp_path: Path,
+) -> None:
+    # Production plates OOM'd when annotated/normalized/feature_selected
+    # all stayed live; keep_frames=False frees them but must still report
+    # true counts (the run summary reads the count fields, not the frames).
+    raw = _plate_raw_profiles().drop(
+        columns=["_disease_condition", "_treatment", "_treatment_conc"]
+    )
+    result = finalize_plate(
+        raw_profiles=raw,
+        site_metadata=_site_metadata(),
+        run_dir=tmp_path / "run",
+        experiment="HRCE-1",
+        plate="25",
+        keep_frames=False,
+    )
+    assert len(result.annotated) == 0
+    assert len(result.normalized) == 0
+    assert len(result.feature_selected) == 0
+    assert result.n_cells_normalized == len(raw) - result.n_cells_flagged_outlier
+    assert result.n_cells_feature_selected > 0
+    assert result.n_feature_selected_cols > 0
+    assert result.normalized_path.is_file()
+    assert result.feature_selected_path.is_file()
+    assert result.buscar is not None
+
+
 def test_finalize_plate_buscar_keeps_profiler_label(tmp_path: Path) -> None:
     # buscar outputs must carry the profiler the plate was finalized
     # with (summary filename + "profiler" field), not the default label.
