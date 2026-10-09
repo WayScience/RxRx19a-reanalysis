@@ -433,12 +433,13 @@ def _finalize_profiles(
             plate=plate,
             profiler=profiler,
             run_buscar=buscar,
+            keep_frames=False,
         )
         # finalize_plate already wrote the normalized and
         # feature-selected parquets for this plate; keep only counts
         # (not the frames) so memory stays per-plate.
-        normalized_rows += len(result.normalized)
-        selected_cols = result.feature_selected.shape[1]
+        normalized_rows += result.n_cells_normalized
+        selected_cols = result.n_feature_selected_cols
         plates += 1
         cs = result.control_separation
         plate_summaries.append(
@@ -448,8 +449,8 @@ def _finalize_profiles(
                 profiler=profiler,
                 n_cells_input=n_cells_input,
                 n_cells_flagged_outlier=result.n_cells_flagged_outlier,
-                n_cells_normalized=len(result.normalized),
-                n_feature_selected_cols=result.feature_selected.shape[1],
+                n_cells_normalized=result.n_cells_normalized,
+                n_feature_selected_cols=result.n_feature_selected_cols,
                 control_separation_passed=cs.passed if cs else None,
                 control_separation_skipped=cs.skipped if cs else None,
                 control_separation_median_effect_size=(
