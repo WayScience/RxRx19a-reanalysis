@@ -8,6 +8,7 @@ import sys
 
 import fire
 
+from rerx.agentic.cli import AgentCLI
 from rerx.main import show_message
 from rerx.runs import PROTECTED, Run, list_runs, validate_run_id
 from rerx.storage import load_storage_config
@@ -107,6 +108,7 @@ class RunsCLI:
 class ReRxCLI:
     def __init__(self) -> None:
         self.runs = RunsCLI()
+        self.agent = AgentCLI()
 
     def show_message(
         self,
