@@ -44,7 +44,7 @@ class AgentCLI:
             raise SystemExit(1)
         print(f"valid workflow document: {workflow}")
 
-    def run(  # noqa: PLR0913
+    def run(  # noqa: PLR0913, PLR0917
         self,
         workflow: str,
         skills: str,
