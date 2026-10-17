@@ -70,8 +70,7 @@ def test_run_walks_default_style_workflow(
     workflow.write_text(json.dumps(document), encoding="utf-8")
     responder = tmp_path / "responder.sh"
     responder.write_text(
-        '#!/bin/sh\n'
-        'cat\n',
+        "#!/bin/sh\ncat\n",
         encoding="utf-8",
     )
     responder.chmod(0o755)
@@ -89,7 +88,11 @@ def test_run_walks_default_style_workflow(
     )
     captured = capsys.readouterr()
     assert "needs_review" in captured.out
-    events = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines() if line]
+    events = [
+        json.loads(line)
+        for line in journal.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
     assert events[-1]["event"] == "term_reached"
 
 
@@ -123,8 +126,10 @@ def test_resume_continues_from_journal(
     ticket.write_text('{"title": "t"}\n', encoding="utf-8")
     journal = tmp_path / "journal.jsonl"
     journal.write_text(
-        json.dumps({"event": "node_started", "node": "echo", "attempt": 1}) + "\n"
-        + json.dumps({"event": "node_completed", "node": "echo", "attempt": 1}) + "\n",
+        json.dumps({"event": "node_started", "node": "echo", "attempt": 1})
+        + "\n"
+        + json.dumps({"event": "node_completed", "node": "echo", "attempt": 1})
+        + "\n",
         encoding="utf-8",
     )
     cli = AgentCLI()

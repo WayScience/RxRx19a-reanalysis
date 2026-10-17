@@ -18,7 +18,10 @@ from rerx.agentic.model import validate_predicate
 _EFFORT_ORDER = ("xs", "s", "m", "l", "xl")
 
 
-def evaluate_predicate(predicate: dict, state: dict) -> bool:
+def evaluate_predicate(  # noqa: C901, PLR0911
+    predicate: dict,
+    state: dict,
+) -> bool:
     """
     Evaluate one predicate against a run's state.
 
@@ -70,7 +73,10 @@ def evaluate_predicate(predicate: dict, state: dict) -> bool:
         return value > target
     if kind == "labels":
         ticket = state.get("ticket", {})
-        labels = set(ticket.get("labels", []))
+        raw = ticket.get("labels", []) if isinstance(ticket, dict) else []
+        if not isinstance(raw, list):
+            return False
+        labels = {label for label in raw if isinstance(label, str)}
         return bool(labels & set(predicate["labels"]))
     if kind == "paths":
         glob = predicate["glob"]

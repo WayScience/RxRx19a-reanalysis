@@ -12,14 +12,34 @@ from rerx.agentic.runner import AgenticRunner
 
 def _skills(tmp_path: Path) -> Path:
     skills = tmp_path / "skills"
-    for name, body in {
-        "triage": '{"type": "object", "required": ["category", "changed_paths"], "properties": {"category": {"type": "string"}, "changed_paths": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false}',
-        "review": '{"type": "object", "required": ["verdict", "findings", "changed_paths"], "properties": {"verdict": {"type": "string", "enum": ["pass", "fail"]}, "findings": {"type": "array", "items": {"type": "object"}}, "changed_paths": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false}',
-    }.items():
+    contracts = {
+        "triage": {
+            "type": "object",
+            "required": ["category", "changed_paths"],
+            "properties": {
+                "category": {"type": "string"},
+                "changed_paths": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+        "review": {
+            "type": "object",
+            "required": ["verdict", "findings", "changed_paths"],
+            "properties": {
+                "verdict": {"type": "string", "enum": ["pass", "fail"]},
+                "findings": {"type": "array", "items": {"type": "object"}},
+                "changed_paths": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+    }
+    for name, contract in contracts.items():
         skill = skills / name
         skill.mkdir(parents=True)
+        body = json.dumps(contract)
         (skill / "SKILL.md").write_text(
-            f"# {name}\n\nDo the thing.\n\n## Output contract\n\n```json\n{body}\n```\n",
+            f"# {name}\n\nDo the thing.\n\n"
+            f"## Output contract\n\n```json\n{body}\n```\n",
             encoding="utf-8",
         )
     return skills
@@ -43,9 +63,7 @@ def test_run_result_carries_evidence_for_the_human(tmp_path: Path) -> None:
     path.write_text(json.dumps(document), encoding="utf-8")
     responses = iter(
         [
-            json.dumps(
-                {"category": "bug", "changed_paths": ["src/rerx/bug.py"]}
-            ),
+            json.dumps({"category": "bug", "changed_paths": ["src/rerx/bug.py"]}),
             json.dumps(
                 {
                     "verdict": "fail",

@@ -147,18 +147,14 @@ def test_validate_document_rejects_out_edge_from_term() -> None:
 
 def test_validate_document_rejects_unreachable_node() -> None:
     doc = _doc()
-    doc["nodes"].append(
-        {"id": "orphan", "type": "infra", "command": ["true"]}
-    )
+    doc["nodes"].append({"id": "orphan", "type": "infra", "command": ["true"]})
     errors = validate_document(doc)
     assert any("orphan" in error and "reach" in error for error in errors)
 
 
 def test_validate_document_rejects_node_that_cannot_reach_a_term() -> None:
     doc = _doc()
-    doc["nodes"].append(
-        {"id": "island", "type": "term", "action": "needs_review"}
-    )
+    doc["nodes"].append({"id": "island", "type": "term", "action": "needs_review"})
     errors = validate_document(doc)
     assert any("island" in error for error in errors)
 
@@ -214,3 +210,14 @@ def test_validate_document_rejects_unknown_top_level_key() -> None:
     doc["surprise"] = True
     errors = validate_document(doc)
     assert any("surprise" in error for error in errors)
+
+
+def test_validate_document_survives_malformed_edges() -> None:
+    # malformed edges must produce errors, not a traceback
+    doc = _doc()
+    doc["edges"].append({"from": "triage"})
+    errors = validate_document(doc)
+    assert any("from and to" in error for error in errors)
+    doc["edges"].append("oops")
+    errors = validate_document(doc)
+    assert any("must be an object" in error for error in errors)

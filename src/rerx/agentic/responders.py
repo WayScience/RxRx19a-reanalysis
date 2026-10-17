@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
-from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -67,6 +66,10 @@ class CommandResponder:
             raise RuntimeError(
                 f"responder command {self.command[0]!r} timed out "
                 f"after {self.timeout_s}s"
+            ) from error
+        except OSError as error:
+            raise RuntimeError(
+                f"responder command {self.command[0]!r} could not start: {error}"
             ) from error
         if completed.returncode != 0:
             detail = completed.stderr.strip() or "no stderr"

@@ -49,9 +49,12 @@ def test_full_prepare_includes_every_site_and_plans_shards(
                     "plate": "1",
                     "well": "A01",
                     "site": site,
+                    # real metadata stores empty treatments as pd.NA in
+                    # string columns (control wells have no treatment)
+                    "treatment": pd.NA,
                 }
             )
-    sites = pd.DataFrame(rows)
+    sites = pd.DataFrame(rows).astype({"treatment": "string"})
     monkeypatch.setattr(
         metadata, "download_metadata", lambda inputs: inputs / "metadata.csv"
     )

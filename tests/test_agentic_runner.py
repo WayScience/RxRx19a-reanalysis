@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 
 from rerx.agentic.model import load_workflow
-from rerx.agentic.runner import AgenticRunner, RunResult, extract_json
 from rerx.agentic.responders import CommandResponder
+from rerx.agentic.runner import AgenticRunner, RunResult, extract_json
 
 
 def _skills_dir(tmp_path: Path) -> Path:
@@ -49,7 +49,12 @@ def _workflow_path(tmp_path: Path, command: list[str], max_retries: int = 1) -> 
         "nodes": [
             {"id": "plan", "type": "llm", "skill": "plan", "max_retries": max_retries},
             {"id": "checks", "type": "infra", "command": command},
-            {"id": "gate", "type": "flow", "kind": "gate", "predicate": {"kind": "checks", "status": "passed"}},
+            {
+                "id": "gate",
+                "type": "flow",
+                "kind": "gate",
+                "predicate": {"kind": "checks", "status": "passed"},
+            },
             {"id": "done", "type": "term", "action": "needs_review"},
         ],
         "edges": [
@@ -111,17 +116,22 @@ def test_passing_check_is_required_before_term(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     script.chmod(0o755)
-    runner = _runner(tmp_path, lambda prompt: _valid_output(), command=["sh", str(script)])
+    runner = _runner(
+        tmp_path, lambda prompt: _valid_output(), command=["sh", str(script)]
+    )
     result = runner.run(ticket={"title": "t"})
     assert result.outcome == "needs_review"
     events = [
         json.loads(line)
-        for line in (tmp_path / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (tmp_path / "journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
     names = [event["event"] for event in events]
     assert "gate_failed" in names
     plan_starts = [
-        event for event in events
+        event
+        for event in events
         if event["event"] == "node_started" and event["node"] == "plan"
     ]
     assert len(plan_starts) == 2
@@ -149,10 +159,13 @@ def test_zero_retries_fails_on_first_gate_loop(tmp_path: Path) -> None:
     assert result.outcome == "failed"
     events = [
         json.loads(line)
-        for line in (tmp_path / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (tmp_path / "journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
     plan_starts = [
-        event for event in events
+        event
+        for event in events
         if event["event"] == "node_started" and event["node"] == "plan"
     ]
     assert len(plan_starts) == 1
@@ -197,7 +210,12 @@ def test_changed_paths_reach_gate_predicates(tmp_path: Path) -> None:
         "start": "plan",
         "nodes": [
             {"id": "plan", "type": "llm", "skill": "plan", "max_retries": 1},
-            {"id": "gate", "type": "flow", "kind": "gate", "predicate": {"kind": "paths", "glob": "src/rerx/**"}},
+            {
+                "id": "gate",
+                "type": "flow",
+                "kind": "gate",
+                "predicate": {"kind": "paths", "glob": "src/rerx/**"},
+            },
             {"id": "done", "type": "term", "action": "needs_review"},
         ],
         "edges": [
@@ -223,7 +241,9 @@ def test_changed_paths_reach_gate_predicates(tmp_path: Path) -> None:
     runner = AgenticRunner(
         workflow=load_workflow(path),
         skills_dir=skills,
-        ask=lambda prompt: json.dumps({"summary": "docs only", "changed_paths": ["README.md"]}),
+        ask=lambda prompt: json.dumps(
+            {"summary": "docs only", "changed_paths": ["README.md"]}
+        ),
         workdir=tmp_path,
         journal_path=tmp_path / "j2.jsonl",
     )
@@ -237,9 +257,12 @@ def test_resume_skips_completed_nodes(tmp_path: Path) -> None:
     runner = _runner(tmp_path, lambda prompt: _valid_output())
     journal = tmp_path / "journal.jsonl"
     journal.write_text(
-        json.dumps({"event": "run_started", "node": "plan"}) + "\n"
-        + json.dumps({"event": "node_started", "node": "plan", "attempt": 1}) + "\n"
-        + json.dumps({"event": "node_completed", "node": "plan", "attempt": 1}) + "\n",
+        json.dumps({"event": "run_started", "node": "plan"})
+        + "\n"
+        + json.dumps({"event": "node_started", "node": "plan", "attempt": 1})
+        + "\n"
+        + json.dumps({"event": "node_completed", "node": "plan", "attempt": 1})
+        + "\n",
         encoding="utf-8",
     )
     asked: list[str] = []
@@ -260,11 +283,16 @@ def test_resume_restarts_interrupted_node_with_next_attempt(tmp_path: Path) -> N
     runner = _runner(tmp_path, lambda prompt: _valid_output())
     journal = tmp_path / "journal.jsonl"
     journal.write_text(
-        json.dumps({"event": "run_started", "node": "plan"}) + "\n"
-        + json.dumps({"event": "node_started", "node": "plan", "attempt": 1}) + "\n"
-        + json.dumps({"event": "node_completed", "node": "plan", "attempt": 1}) + "\n"
-        + json.dumps({"event": "gate_failed", "node": "gate", "looped_to": "plan"}) + "\n"
-        + json.dumps({"event": "node_started", "node": "plan", "attempt": 2}) + "\n",
+        json.dumps({"event": "run_started", "node": "plan"})
+        + "\n"
+        + json.dumps({"event": "node_started", "node": "plan", "attempt": 1})
+        + "\n"
+        + json.dumps({"event": "node_completed", "node": "plan", "attempt": 1})
+        + "\n"
+        + json.dumps({"event": "gate_failed", "node": "gate", "looped_to": "plan"})
+        + "\n"
+        + json.dumps({"event": "node_started", "node": "plan", "attempt": 2})
+        + "\n",
         encoding="utf-8",
     )
     asked: list[str] = []
@@ -334,7 +362,17 @@ def test_review_verdict_gates_the_term_via_output_predicate(tmp_path: Path) -> N
         "nodes": [
             {"id": "implement", "type": "llm", "skill": "plan", "max_retries": 1},
             {"id": "review", "type": "llm", "skill": "review", "max_retries": 0},
-            {"id": "gate", "type": "flow", "kind": "gate", "predicate": {"kind": "output", "node": "review", "field": "verdict", "equals": "pass"}},
+            {
+                "id": "gate",
+                "type": "flow",
+                "kind": "gate",
+                "predicate": {
+                    "kind": "output",
+                    "node": "review",
+                    "field": "verdict",
+                    "equals": "pass",
+                },
+            },
             {"id": "done", "type": "term", "action": "needs_review"},
         ],
         "edges": [
@@ -379,8 +417,10 @@ def test_resume_restores_gate_state(tmp_path: Path) -> None:
     runner = _runner(tmp_path, lambda prompt: _valid_output(), command=["false"])
     journal = tmp_path / "journal.jsonl"
     journal.write_text(
-        json.dumps({"event": "run_started", "node": "plan"}) + "\n"
-        + json.dumps({"event": "node_started", "node": "plan", "attempt": 1}) + "\n"
+        json.dumps({"event": "run_started", "node": "plan"})
+        + "\n"
+        + json.dumps({"event": "node_started", "node": "plan", "attempt": 1})
+        + "\n"
         + json.dumps(
             {
                 "event": "node_completed",
@@ -388,9 +428,19 @@ def test_resume_restores_gate_state(tmp_path: Path) -> None:
                 "attempt": 1,
                 "output": {"summary": "v1", "changed_paths": ["src/a.py"]},
             }
-        ) + "\n"
-        + json.dumps({"event": "check_failed", "node": "checks", "exit_code": 1, "stderr": "boom"}) + "\n"
-        + json.dumps({"event": "gate_failed", "node": "gate", "looped_to": "plan"}) + "\n",
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "event": "check_failed",
+                "node": "checks",
+                "exit_code": 1,
+                "stderr": "boom",
+            }
+        )
+        + "\n"
+        + json.dumps({"event": "gate_failed", "node": "gate", "looped_to": "plan"})
+        + "\n",
         encoding="utf-8",
     )
     asked: list[str] = []
@@ -416,7 +466,12 @@ def test_checks_accumulate_across_multiple_check_nodes(tmp_path: Path) -> None:
             {"id": "triage", "type": "llm", "skill": "plan", "max_retries": 0},
             {"id": "lint", "type": "infra", "command": ["true"]},
             {"id": "pytest", "type": "infra", "command": ["false"]},
-            {"id": "gate", "type": "flow", "kind": "gate", "predicate": {"kind": "checks", "status": "passed"}},
+            {
+                "id": "gate",
+                "type": "flow",
+                "kind": "gate",
+                "predicate": {"kind": "checks", "status": "passed"},
+            },
             {"id": "done", "type": "term", "action": "needs_review"},
         ],
         "edges": [
@@ -444,7 +499,7 @@ def test_checks_accumulate_across_multiple_check_nodes(tmp_path: Path) -> None:
         if line
     ]
     # the gate's verdict journaled which checks it saw
-    gate_failed = [e for e in events if e["event"] == "gate_failed"][0]
+    gate_failed = next(e for e in events if e["event"] == "gate_failed")
     assert gate_failed["failed_checks"] == ["pytest"]
 
 
@@ -458,7 +513,12 @@ def test_prompt_carries_prior_stage_outputs_and_check_failures(tmp_path: Path) -
             {"id": "triage", "type": "llm", "skill": "plan", "max_retries": 1},
             {"id": "review", "type": "llm", "skill": "review", "max_retries": 0},
             {"id": "checks", "type": "infra", "command": ["false"]},
-            {"id": "gate", "type": "flow", "kind": "gate", "predicate": {"kind": "checks", "status": "passed"}},
+            {
+                "id": "gate",
+                "type": "flow",
+                "kind": "gate",
+                "predicate": {"kind": "checks", "status": "passed"},
+            },
             {"id": "done", "type": "term", "action": "needs_review"},
         ],
         "edges": [
@@ -499,26 +559,79 @@ def test_prompt_carries_prior_stage_outputs_and_check_failures(tmp_path: Path) -
 def test_command_responder_pipes_prompt_and_captures_stdout(tmp_path: Path) -> None:
     script = tmp_path / "responder.sh"
     script.write_text(
-        '#!/bin/sh\n'
-        'read prompt\n'
-        'printf \'{"summary": "got: %s"}\\n\' "$prompt"\n',
+        '#!/bin/sh\nread prompt\nprintf \'{"summary": "got: %s"}\\n\' "$prompt"\n',
         encoding="utf-8",
     )
     script.chmod(0o755)
-    responder = CommandResponder(command=["sh", str(script)])
+    responder = CommandResponder(command=("sh", str(script)))
     assert responder("hello ticket") == '{"summary": "got: hello ticket"}'
 
 
 def test_command_responder_raises_when_command_fails(tmp_path: Path) -> None:
-    responder = CommandResponder(command=["false"])
+    responder = CommandResponder(command=("false",))
     with pytest.raises(RuntimeError, match="responder"):
         responder("prompt")
 
 
 def test_command_responder_times_out_a_hanging_command() -> None:
-    responder = CommandResponder(command=["sleep", "10"], timeout_s=1)
+    responder = CommandResponder(command=("sleep", "10"), timeout_s=1)
     with pytest.raises(RuntimeError, match="timed out"):
         responder("prompt")
+
+
+def test_command_responder_reports_missing_command_as_stage_failure() -> None:
+    responder = CommandResponder(command=("definitely-not-a-command-xyz",))
+    with pytest.raises(RuntimeError, match="could not start"):
+        responder("prompt")
+
+
+def test_prompt_includes_the_output_contract(tmp_path: Path) -> None:
+    # the model must see the schema it is required to satisfy
+    prompts: list[str] = []
+
+    def ask(prompt: str) -> str:
+        prompts.append(prompt)
+        return _valid_output()
+
+    runner = _runner(tmp_path, ask)
+    runner.run(ticket={"title": "t"})
+    assert "changed_paths" in prompts[0]
+    assert "required" in prompts[0]
+
+
+def test_resume_of_failed_run_does_not_redo_work(tmp_path: Path) -> None:
+    # a failed run is terminal: re-running with the same journal must
+    # not rewind to the loop target and redo stages
+    runner = _runner(
+        tmp_path,
+        lambda prompt: _valid_output(),
+        command=["false"],
+        max_retries=0,
+    )
+    first = runner.run(ticket={"title": "t"})
+    assert first.outcome == "failed"
+    asked: list[str] = []
+
+    def ask(prompt: str) -> str:
+        asked.append(prompt)
+        return _valid_output()
+
+    runner.ask = ask
+    second = runner.run(ticket={"title": "t"})
+    assert second.outcome == "failed"
+    assert second.failed_reason is not None
+    assert asked == []
+
+
+def test_resume_of_finished_run_returns_the_evidence(tmp_path: Path) -> None:
+    runner = _runner(tmp_path, lambda prompt: _valid_output())
+    first = runner.run(ticket={"title": "t"})
+    assert first.outcome == "needs_review"
+    assert first.outputs["plan"]["summary"] == "fix the thing"
+    second = runner.run(ticket={"title": "t"})
+    assert second.outcome == "needs_review"
+    assert second.outputs["plan"]["summary"] == "fix the thing"
+    assert second.changed_paths == ["src/rerx/x.py"]
 
 
 def test_runner_check_times_out(tmp_path: Path) -> None:
@@ -528,7 +641,12 @@ def test_runner_check_times_out(tmp_path: Path) -> None:
         "start": "checks",
         "nodes": [
             {"id": "checks", "type": "infra", "command": ["sleep", "30"]},
-            {"id": "gate", "type": "flow", "kind": "gate", "predicate": {"kind": "checks", "status": "passed"}},
+            {
+                "id": "gate",
+                "type": "flow",
+                "kind": "gate",
+                "predicate": {"kind": "checks", "status": "passed"},
+            },
             {"id": "done", "type": "term", "action": "needs_review"},
         ],
         "edges": [
@@ -554,7 +672,10 @@ def test_runner_check_times_out(tmp_path: Path) -> None:
         for line in (tmp_path / "j.jsonl").read_text(encoding="utf-8").splitlines()
         if line
     ]
-    assert any(e["event"] == "check_failed" and "timed out" in e.get("reason", "") for e in events)
+    assert any(
+        e["event"] == "check_failed" and "timed out" in e.get("reason", "")
+        for e in events
+    )
 
 
 def test_retry_prompt_names_the_previous_violations(tmp_path: Path) -> None:

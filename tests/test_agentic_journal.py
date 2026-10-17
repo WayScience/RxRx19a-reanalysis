@@ -40,9 +40,7 @@ def test_load_journal_missing_file_is_empty(tmp_path: Path) -> None:
 
 def test_load_journal_tolerates_blank_lines(tmp_path: Path) -> None:
     path = tmp_path / "journal.jsonl"
-    path.write_text(
-        '{"event": "a"}\n\n{"event": "b"}\n', encoding="utf-8"
-    )
+    path.write_text('{"event": "a"}\n\n{"event": "b"}\n', encoding="utf-8")
     loaded = load_journal(path)
     assert [event["event"] for event in loaded] == ["a", "b"]
 
@@ -106,7 +104,9 @@ def test_journal_replay_after_interrupted_loop_iteration(
     journal.append({"event": "node_started", "node": "implement", "attempt": 2})
     events = load_journal(tmp_path / "journal.jsonl")
     assert _current_node(events) == "implement"
-    started = [e for e in events if e["event"] == "node_started" and e["node"] == "implement"]
+    started = [
+        e for e in events if e["event"] == "node_started" and e["node"] == "implement"
+    ]
     assert len(started) == 2
 
 
@@ -157,9 +157,7 @@ def test_replay_reports_pending_loop_target(tmp_path: Path) -> None:
     journal = Journal(path=tmp_path / "journal.jsonl")
     journal.append({"event": "run_started", "node": "plan"})
     journal.append({"event": "node_completed", "node": "plan", "attempt": 1})
-    journal.append(
-        {"event": "gate_failed", "node": "gate", "looped_to": "implement"}
-    )
+    journal.append({"event": "gate_failed", "node": "gate", "looped_to": "implement"})
     position = replay(load_journal(tmp_path / "journal.jsonl"))
     assert position.pending_loop_to == "implement"
 
@@ -172,11 +170,39 @@ def test_replay_drops_check_state_across_a_loop(tmp_path: Path) -> None:
     journal.append(
         {"event": "node_completed", "node": "pytest", "passed": True, "attempt": 1}
     )
-    journal.append(
-        {"event": "gate_failed", "node": "gate", "looped_to": "plan"}
-    )
+    journal.append({"event": "gate_failed", "node": "gate", "looped_to": "plan"})
     journal.append(
         {"event": "node_completed", "node": "pytest", "passed": True, "attempt": 2}
     )
     position = replay(load_journal(tmp_path / "journal.jsonl"))
     assert position.checks == {"pytest": True}
+
+
+def test_replay_clears_pending_loop_once_target_starts(tmp_path: Path) -> None:
+    # a gate looped back and the target completed: the pending loop is
+    # spent, and a resume must not rewind to it again
+    journal = Journal(path=tmp_path / "journal.jsonl")
+    journal.append({"event": "run_started", "node": "plan"})
+    journal.append({"event": "node_completed", "node": "plan", "attempt": 1})
+    journal.append({"event": "gate_failed", "node": "gate", "looped_to": "plan"})
+    journal.append({"event": "node_started", "node": "plan", "attempt": 2})
+    journal.append({"event": "node_completed", "node": "plan", "attempt": 2})
+    position = replay(load_journal(tmp_path / "journal.jsonl"))
+    assert position.pending_loop_to is None
+
+
+def test_replay_clears_pending_loop_on_gate_pass(tmp_path: Path) -> None:
+    journal = Journal(path=tmp_path / "journal.jsonl")
+    journal.append({"event": "gate_failed", "node": "gate", "looped_to": "plan"})
+    journal.append({"event": "gate_passed", "node": "gate"})
+    position = replay(load_journal(tmp_path / "journal.jsonl"))
+    assert position.pending_loop_to is None
+
+
+def test_replay_treats_run_failed_as_terminal(tmp_path: Path) -> None:
+    journal = Journal(path=tmp_path / "journal.jsonl")
+    journal.append({"event": "gate_failed", "node": "gate", "looped_to": "plan"})
+    journal.append({"event": "run_failed", "reason": "loop bound exceeded"})
+    position = replay(load_journal(tmp_path / "journal.jsonl"))
+    assert position.terminated is True
+    assert position.failed_reason == "loop bound exceeded"

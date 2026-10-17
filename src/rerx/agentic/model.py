@@ -106,10 +106,15 @@ class Workflow:
     edges: tuple[Edge, ...]
 
 
+NODE_ID_MAX_LENGTH = 64
+SKILL_NAME_MAX_LENGTH = 128
+MAX_STAGE_RETRIES = 10
+
+
 def _is_node_id(node_id: str) -> bool:
     return (
         bool(node_id)
-        and len(node_id) <= 64
+        and len(node_id) <= NODE_ID_MAX_LENGTH
         and node_id[0].isalnum()
         and node_id[-1].isalnum()
         and all(char.isalnum() or char == "-" for char in node_id)
@@ -120,7 +125,7 @@ def _is_node_id(node_id: str) -> bool:
 def _is_slug(text: str) -> bool:
     return (
         bool(text)
-        and len(text) <= 128
+        and len(text) <= SKILL_NAME_MAX_LENGTH
         and all(char.isalnum() or char == "-" for char in text)
         and text == text.lower()
     )
@@ -135,7 +140,9 @@ def _is_path_glob(glob: str) -> bool:
     )
 
 
-def validate_predicate(predicate: dict) -> str | None:
+def validate_predicate(  # noqa: C901, PLR0911, PLR0912
+    predicate: dict,
+) -> str | None:
     """
     Validate one structured predicate.
 
@@ -153,10 +160,7 @@ def validate_predicate(predicate: dict) -> str | None:
     if kind == "checks":
         status = predicate.get("status")
         if status not in ("passed", "failed"):
-            return (
-                "a checks predicate needs status passed or failed, "
-                f"got {status!r}"
-            )
+            return f"a checks predicate needs status passed or failed, got {status!r}"
         return None
     if kind == "effort":
         op = predicate.get("op")
@@ -192,7 +196,7 @@ def validate_predicate(predicate: dict) -> str | None:
     return f"unknown predicate kind {kind!r}"
 
 
-def _validate_node(node: object, index: int) -> list[str]:
+def _validate_node(node: object, index: int) -> list[str]:  # noqa: C901, PLR0912
     errors: list[str] = []
     where = f"node {index}"
     if not isinstance(node, dict):
@@ -233,15 +237,21 @@ def _validate_node(node: object, index: int) -> list[str]:
                 f"{where}: an llm node needs a skill, a lower-case hyphenated name"
             )
         retries = node.get("max_retries", 0)
-        if not isinstance(retries, int) or isinstance(retries, bool) or not 0 <= retries <= 10:
+        if (
+            not isinstance(retries, int)
+            or isinstance(retries, bool)
+            or not 0 <= retries <= MAX_STAGE_RETRIES
+        ):
             errors.append(
-                f"{where}: max_retries must be an integer from 0 to 10, "
-                f"got {retries!r}"
+                f"{where}: max_retries must be an integer "
+                f"from 0 to {MAX_STAGE_RETRIES}, got {retries!r}"
             )
     elif node_type == "infra":
         command = node.get("command")
-        if not isinstance(command, list) or not command or any(
-            not isinstance(arg, str) or not arg for arg in command
+        if (
+            not isinstance(command, list)
+            or not command
+            or any(not isinstance(arg, str) or not arg for arg in command)
         ):
             errors.append(f"{where}: an infra node needs a non-empty command list")
         if node.get("max_retries", 0) != 0:
@@ -282,7 +292,9 @@ def _reachable(start: str, edges: list[dict]) -> set[str]:
     return seen
 
 
-def _can_reach_term(node_id: str, node_types: dict[str, str], edges: list[dict]) -> bool:
+def _can_reach_term(
+    node_id: str, node_types: dict[str, str], edges: list[dict]
+) -> bool:
     adjacency: dict[str, set[str]] = {}
     for edge in edges:
         adjacency.setdefault(edge["from"], set()).add(edge["to"])
@@ -299,7 +311,7 @@ def _can_reach_term(node_id: str, node_types: dict[str, str], edges: list[dict])
     return False
 
 
-def validate_document(document: object) -> list[str]:
+def validate_document(document: object) -> list[str]:  # noqa: C901, PLR0912, PLR0915
     """
     Validate a workflow document and list every problem.
 
@@ -358,14 +370,14 @@ def validate_document(document: object) -> list[str]:
                 node_types[node_id] = node["type"]
                 if node.get("kind") is not None:
                     node_kinds[node_id] = node["kind"]
-    if isinstance(start, str) and start in seen_ids:
-        if node_types.get(start) == "term":
-            errors.append(f"start node {start!r} cannot be a term node")
+    if isinstance(start, str) and start in seen_ids and node_types.get(start) == "term":
+        errors.append(f"start node {start!r} cannot be a term node")
     known_ids = set(node_ids)
     if isinstance(start, str) and known_ids and start not in known_ids:
         errors.append(f"start node {start!r} is not in nodes")
     default_out: dict[str, int] = {}
     gate_loops: dict[str, str] = {}
+    valid_edges: list[dict] = []
     for index, edge in enumerate(edges):
         if not isinstance(edge, dict):
             errors.append(f"edge {index}: an edge must be an object")
@@ -379,6 +391,7 @@ def validate_document(document: object) -> list[str]:
         if not isinstance(source, str) or not isinstance(target, str):
             errors.append(f"{where}: from and to must be node ids")
             continue
+        valid_edges.append(edge)
         if source not in known_ids:
             errors.append(f"{where}: from node {source!r} is not in nodes")
         if target not in known_ids:
@@ -400,18 +413,13 @@ def validate_document(document: object) -> list[str]:
                 )
             else:
                 gate_loops[source] = target
-        else:
-            if source in node_types:
-                default_out[source] = default_out.get(source, 0) + 1
-                if default_out[source] > 1:
-                    errors.append(
-                        f"{where}: a node may have at most one default out-edge"
-                    )
+        elif source in node_types:
+            default_out[source] = default_out.get(source, 0) + 1
+            if default_out[source] > 1:
+                errors.append(f"{where}: a node may have at most one default out-edge")
     for gate, loop_target in gate_loops.items():
         if node_types.get(loop_target) == "term":
-            errors.append(
-                f"node {gate!r}: a loop edge must not point at a term node"
-            )
+            errors.append(f"node {gate!r}: a loop edge must not point at a term node")
     for node_id, node_kind in node_kinds.items():
         if node_kind == "gate" and node_id not in gate_loops:
             errors.append(
@@ -430,12 +438,12 @@ def validate_document(document: object) -> list[str]:
                 f"unknown node {referenced!r}"
             )
     if isinstance(start, str) and start in known_ids:
-        reachable = _reachable(start, edges)
+        reachable = _reachable(start, valid_edges)
         for node_id in node_ids:
             if node_id not in reachable:
                 errors.append(f"node {node_id!r}: unreachable from start")
         for node_id in node_ids:
-            if not _can_reach_term(node_id, node_types, edges):
+            if not _can_reach_term(node_id, node_types, valid_edges):
                 errors.append(f"node {node_id!r}: cannot reach a term node")
         for gate in gate_loops:
             if gate not in reachable:

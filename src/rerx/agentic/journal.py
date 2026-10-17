@@ -46,6 +46,8 @@ class JournalPosition:
         failure resets the round, so checks before it are not carried.
     pending_loop_to : str | None
         The node a failed gate looped toward when the journal ends.
+    failed_reason : str | None
+        Why the run failed, from a terminal ``run_failed`` event.
     """
 
     current_node: str | None
@@ -57,6 +59,7 @@ class JournalPosition:
     changed_paths: list[str]
     checks: dict[str, bool]
     pending_loop_to: str | None
+    failed_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -122,7 +125,7 @@ def load_journal(path: Path) -> list[dict]:
     return events
 
 
-def replay(events: list[dict]) -> JournalPosition:
+def replay(events: list[dict]) -> JournalPosition:  # noqa: C901
     """
     Fold journal events into the position a run resumes from.
 
@@ -141,6 +144,7 @@ def replay(events: list[dict]) -> JournalPosition:
     completed: dict[str, None] = {}
     terminated = False
     term_action: str | None = None
+    failed_reason: str | None = None
     outputs: dict[str, dict] = {}
     changed_paths: list[str] = []
     checks: dict[str, bool] = {}
@@ -152,6 +156,7 @@ def replay(events: list[dict]) -> JournalPosition:
             continue
         if name == "node_started" and isinstance(node, str):
             current_node = node
+            pending_loop_to = None
             attempts[node] = event.get("attempt", attempts.get(node, 0) + 1)
         elif name == "node_completed" and isinstance(node, str):
             completed[node] = None
@@ -171,9 +176,14 @@ def replay(events: list[dict]) -> JournalPosition:
             checks = {}
         elif name == "gate_passed":
             current_node = None
+            pending_loop_to = None
         elif name == "term_reached":
             terminated = True
             term_action = event.get("action")
+            current_node = None
+        elif name == "run_failed":
+            terminated = True
+            failed_reason = event.get("reason")
             current_node = None
     return JournalPosition(
         current_node=current_node,
@@ -185,4 +195,5 @@ def replay(events: list[dict]) -> JournalPosition:
         changed_paths=changed_paths,
         checks=checks,
         pending_loop_to=pending_loop_to,
+        failed_reason=failed_reason,
     )

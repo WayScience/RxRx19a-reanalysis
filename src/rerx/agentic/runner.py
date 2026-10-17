@@ -20,12 +20,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from rerx.agentic.journal import Journal, load_journal, replay
+from rerx.agentic.journal import Journal, JournalPosition, load_journal, replay
 from rerx.agentic.model import Node, Workflow
 from rerx.agentic.predicates import evaluate_predicate
 from rerx.agentic.skills import load_skill, validate_output
 
 Responder = Callable[[str], str]
+
+MAX_WALK_STEPS = 1000
 
 
 def _skill_name(node: Node) -> str:
@@ -76,7 +78,7 @@ class _RunState:
 _FENCE_PATTERN = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
 
-def _first_balanced_object(text: str) -> str | None:
+def _first_balanced_object(text: str) -> str | None:  # noqa: C901
     """
     Find the first balanced ``{...}`` span in text, honoring strings.
     """
@@ -99,11 +101,10 @@ def _first_balanced_object(text: str) -> str | None:
             if depth == 0:
                 start = index
             depth += 1
-        elif char == "}":
-            if depth > 0:
-                depth -= 1
-                if depth == 0:
-                    return text[start : index + 1]
+        elif char == "}" and depth > 0:
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
     return None
 
 
@@ -193,19 +194,23 @@ class AgenticRunner:
 
     def _prompt(self, node: Node, state: _RunState, extra: str = "") -> str:
         skill = load_skill(Path(self.skills_dir) / _skill_name(node))
-        prompt = f"{skill.body}\n\n# Ticket\n\n{json.dumps(state.ticket, indent=2)}"
+        prompt = f"{skill.body}"
+        if skill.contract is not None:
+            prompt += (
+                "\n\n# Output contract\n\nReply with a JSON object that "
+                f"satisfies this schema:\n{json.dumps(skill.contract, indent=2)}"
+            )
+        prompt += f"\n\n# Ticket\n\n{json.dumps(state.ticket, indent=2)}"
         if state.outputs:
             evidence = json.dumps(state.outputs, indent=2)
             prompt += f"\n\n# Prior stage outputs\n\n{evidence}"
         if state.check_output:
-            prompt += (
-                "\n\n# Check results this round\n\n"
-                + json.dumps(state.check_output, indent=2)
+            prompt += "\n\n# Check results this round\n\n" + json.dumps(
+                state.check_output, indent=2
             )
         if state.changed_paths:
-            prompt += (
-                "\n\n# Changed paths\n\n"
-                + "\n".join(f"- {path}" for path in state.changed_paths)
+            prompt += "\n\n# Changed paths\n\n" + "\n".join(
+                f"- {path}" for path in state.changed_paths
             )
         prompt += f"\n\n# Working directory\n\n{Path(self.workdir).resolve()}"
         if extra:
@@ -306,7 +311,26 @@ class AgenticRunner:
         )
         return passed, detail
 
-    def run(self, ticket: dict) -> RunResult:
+    def _fail(self, reason: str, state: _RunState) -> RunResult:
+        """
+        Journal a terminal failure and build its result.
+
+        Parameters
+        ----------
+        reason : str
+            Why the run failed.
+        state : _RunState
+            The run's state, for the evidence fields.
+        """
+        self.journal.append({"event": "run_failed", "reason": reason})
+        return RunResult(
+            outcome="failed",
+            failed_reason=reason,
+            outputs=dict(state.outputs),
+            changed_paths=list(state.changed_paths),
+        )
+
+    def run(self, ticket: dict) -> RunResult:  # noqa: C901, PLR0911, PLR0912, PLR0915
         """
         Walk the workflow for one ticket.
 
@@ -324,8 +348,13 @@ class AgenticRunner:
         position = replay(events)
         if position.terminated:
             return RunResult(
-                outcome=position.term_action or "needs_review",
+                outcome=(position.failed_reason and "failed")
+                or position.term_action
+                or "needs_review",
                 node=None,
+                failed_reason=position.failed_reason,
+                outputs=dict(position.outputs),
+                changed_paths=list(position.changed_paths),
             )
         state = _RunState(
             ticket=ticket,
@@ -347,8 +376,8 @@ class AgenticRunner:
         guard = 0
         while node_id is not None:
             guard += 1
-            if guard > 1000:
-                return RunResult(outcome="failed", failed_reason="run did not terminate")
+            if guard > MAX_WALK_STEPS:
+                return self._fail("run did not terminate", state)
             node = self.workflow.nodes[node_id]
             node_type = node.type
             attempt = attempts.get(node_id, 0) + 1
@@ -359,9 +388,8 @@ class AgenticRunner:
                 )
                 output = self._run_llm(node, state)
                 if output is None:
-                    return RunResult(
-                        outcome="failed",
-                        failed_reason=f"stage {node_id!r} exhausted its attempts",
+                    return self._fail(
+                        f"stage {node_id!r} exhausted its attempts", state
                     )
                 state.outputs[node_id] = output
                 paths = output.get("changed_paths")
@@ -382,7 +410,12 @@ class AgenticRunner:
                 )
                 passed, detail = self._run_infra(node)
                 self.journal.append(
-                    {"event": "node_completed", "node": node_id, "passed": passed, "attempt": attempt}
+                    {
+                        "event": "node_completed",
+                        "node": node_id,
+                        "passed": passed,
+                        "attempt": attempt,
+                    }
                 )
                 state.checks[node_id] = passed
                 state.check_output[node_id] = detail
@@ -406,9 +439,7 @@ class AgenticRunner:
                 }
                 holds = evaluate_predicate(predicate, predicate_state)
                 if holds:
-                    self.journal.append(
-                        {"event": "gate_passed", "node": node_id}
-                    )
+                    self.journal.append({"event": "gate_passed", "node": node_id})
                     node_id = _default_edge(self.workflow, node_id)
                 else:
                     loop_target = _loop_edge(self.workflow, node_id)
@@ -421,19 +452,16 @@ class AgenticRunner:
                         }
                     )
                     if loop_target is None:
-                        return RunResult(
-                            outcome="failed",
-                            failed_reason=f"gate {node_id!r} failed with no loop edge",
+                        return self._fail(
+                            f"gate {node_id!r} failed with no loop edge", state
                         )
                     loop_node = self.workflow.nodes[loop_target]
                     loop_attempts = attempts.get(loop_target, 0) + 1
                     if loop_attempts > loop_node.max_retries + 1:
-                        return RunResult(
-                            outcome="failed",
-                            failed_reason=(
-                                f"gate {node_id!r} looped to {loop_target!r} "
-                                f"more times than its max_retries allows"
-                            ),
+                        return self._fail(
+                            f"gate {node_id!r} looped to {loop_target!r} "
+                            f"more times than its max_retries allows",
+                            state,
                         )
                     state.checks = {}
                     node_id = loop_target
@@ -451,14 +479,9 @@ class AgenticRunner:
                     outputs=dict(state.outputs),
                     changed_paths=list(state.changed_paths),
                 )
-        return RunResult(
-            outcome="failed",
-            failed_reason="run left the graph",
-            outputs=dict(state.outputs),
-            changed_paths=list(state.changed_paths),
-        )
+        return self._fail("run left the graph", state)
 
-    def _entry(self, position) -> str:
+    def _entry(self, position: JournalPosition) -> str:
         """
         Pick the node a fresh or fully-caught-up resume starts from.
         """

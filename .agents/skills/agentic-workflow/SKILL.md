@@ -44,7 +44,7 @@ an interrupted run resumes where it stopped.
 ## Authoring rules
 
 - A skill's output contract lives under an `## Output contract` heading
-  in one fenced ```json block; the harness validates responses against
+  in one fenced \`\`\`json block; the harness validates responses against
   it before accepting them.
 - Every node must be reachable from start and able to reach a term.
 - A gate must have a loop edge to an earlier stage, and a loop target's

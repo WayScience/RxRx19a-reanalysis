@@ -17,9 +17,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-_HEADER_PATTERN = re.compile(
-    r"\A_{5,}\s*\n+##\s*name:.*?(?=\n#\s|\Z)", re.DOTALL
-)
+_HEADER_PATTERN = re.compile(r"\A_{5,}\s*\n+##\s*name:.*?(?=\n#\s|\Z)", re.DOTALL)
 _CONTRACT_HEADING = "## Output contract"
 _FENCE_PATTERN = re.compile(r"```json\s*(.*?)```", re.DOTALL)
 
@@ -64,7 +62,7 @@ def _strip_local_header(body: str) -> str:
     Remove the repo-local underscore-and-``## name:`` header if present.
     """
     match = _HEADER_PATTERN.match(body)
-    return body[match.end():].lstrip() if match else body
+    return body[match.end() :].lstrip() if match else body
 
 
 def _extract_contract(body: str) -> tuple[str, dict | None, str | None]:
@@ -74,7 +72,7 @@ def _extract_contract(body: str) -> tuple[str, dict | None, str | None]:
     heading_index = body.find(_CONTRACT_HEADING)
     if heading_index < 0:
         return body, None, None
-    rest = body[heading_index + len(_CONTRACT_HEADING):]
+    rest = body[heading_index + len(_CONTRACT_HEADING) :]
     fence = _FENCE_PATTERN.search(rest)
     if not fence:
         return body, None, "output contract heading has no ```json fence"
@@ -83,11 +81,7 @@ def _extract_contract(body: str) -> tuple[str, dict | None, str | None]:
         contract = json.loads(raw)
     except json.JSONDecodeError as error:
         return body, None, f"output contract is not valid JSON: {error}"
-    procedure = (
-        body[:heading_index]
-        + rest[: fence.start()]
-        + rest[fence.end():]
-    )
+    procedure = body[:heading_index] + rest[: fence.start()] + rest[fence.end() :]
     return procedure, contract, None
 
 
@@ -126,33 +120,29 @@ def load_skill(directory: Path) -> LoadedSkill:
 
 
 def _type_matches(value: object, expected: str) -> bool:
-    if expected == "object":
-        return isinstance(value, dict)
-    if expected == "array":
-        return isinstance(value, list)
-    if expected == "string":
-        return isinstance(value, str)
-    if expected == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
-    if expected == "number":
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
-    if expected == "boolean":
-        return isinstance(value, bool)
-    if expected == "null":
-        return value is None
-    return False
+    return {
+        "object": lambda: isinstance(value, dict),
+        "array": lambda: isinstance(value, list),
+        "string": lambda: isinstance(value, str),
+        "integer": lambda: isinstance(value, int) and not isinstance(value, bool),
+        "number": lambda: (
+            isinstance(value, (int, float)) and not isinstance(value, bool)
+        ),
+        "boolean": lambda: isinstance(value, bool),
+        "null": lambda: value is None,
+    }.get(expected, lambda: False)()
 
 
-def _check_schema(value: object, schema: dict, path: str) -> list[str]:
+def _check_schema(  # noqa: C901, PLR0912
+    value: object, schema: dict, path: str
+) -> list[str]:
     """
     Check one value against one schema node, recursively.
     """
     errors: list[str] = []
     expected_type = schema.get("type")
     if expected_type is not None:
-        types = (
-            expected_type if isinstance(expected_type, list) else [expected_type]
-        )
+        types = expected_type if isinstance(expected_type, list) else [expected_type]
         if not any(_type_matches(value, name) for name in types):
             found = type(value).__name__
             return [f"{path}: expected type {expected_type!r}, got {found}"]
@@ -177,9 +167,7 @@ def _check_schema(value: object, schema: dict, path: str) -> list[str]:
                 errors.extend(_check_schema(item, items, f"{path}[{index}]"))
     enum = schema.get("enum")
     if enum is not None and value not in enum:
-        errors.append(
-            f"{path}: {value!r} is not one of the allowed values {enum}"
-        )
+        errors.append(f"{path}: {value!r} is not one of the allowed values {enum}")
     return errors
 
 

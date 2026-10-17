@@ -123,8 +123,9 @@ uv run poe run_full
 ```
 
 `uv run poe run_full` pins `RERX_SCOPE=full` and, unless you already set
-`RERX_RUN_ID` yourself (to resume an existing run), generates a fresh
-timestamped `rxrx19a-full-<UTC>-g<sha>` ID. Use `uv run poe run_pilot` the
+`RERX_RUN_ID` yourself, generates a fresh timestamped
+`rxrx19a-full-<UTC>-g<sha>` ID. To resume an incomplete run, set both
+`RERX_RUN_ID` and `RERX_RESUME=1`. Use `uv run poe run_pilot` the
 same way for a pilot run; it pins `RERX_SCOPE=pilot`. Both wrap
 `scripts/alpine_launch.sh` (see `pyproject.toml`'s `[tool.poe.tasks]`),
 so scope can't be set to the wrong value by a stale environment

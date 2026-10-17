@@ -3,7 +3,6 @@ Tests for the skill loader: procedure files, output contracts, and the
 responder protocol (agentic harness, skills slice).
 """
 
-import json
 from pathlib import Path
 
 import pytest
@@ -16,9 +15,7 @@ from rerx.agentic.skills import (
 )
 
 
-def _write_skill(
-    tmp_path: Path, body: str, name: str = "triage"
-) -> Path:
+def _write_skill(tmp_path: Path, body: str, name: str = "triage") -> Path:
     directory = tmp_path / name
     directory.mkdir()
     path = directory / "SKILL.md"
@@ -34,7 +31,8 @@ Decide what a ticket asks for.
 ## Output contract
 
 ```json
-{"type": "object", "required": ["category"], "properties": {"category": {"type": "string", "enum": ["bug", "feature", "docs"]}}}
+{"type": "object", "required": ["category"],
+ "properties": {"category": {"type": "string", "enum": ["bug", "feature", "docs"]}}}
 ```
 
 ## Steps
@@ -72,9 +70,7 @@ def test_validate_output_accepts_matching_output() -> None:
     contract = {
         "type": "object",
         "required": ["category"],
-        "properties": {
-            "category": {"type": "string", "enum": ["bug", "feature"]}
-        },
+        "properties": {"category": {"type": "string", "enum": ["bug", "feature"]}},
         "additionalProperties": False,
     }
     errors = validate_output({"category": "bug"}, contract)
@@ -95,9 +91,7 @@ def test_validate_output_rejects_wrong_enum() -> None:
     contract = {
         "type": "object",
         "required": ["category"],
-        "properties": {
-            "category": {"type": "string", "enum": ["bug", "feature"]}
-        },
+        "properties": {"category": {"type": "string", "enum": ["bug", "feature"]}},
     }
     errors = validate_output({"category": "chore"}, contract)
     assert any("category" in error for error in errors)

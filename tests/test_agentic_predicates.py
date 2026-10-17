@@ -27,13 +27,17 @@ def test_checks_predicate_passes_when_all_checks_pass() -> None:
 
 def test_checks_predicate_fails_when_a_check_failed() -> None:
     predicate = {"kind": "checks", "status": "passed"}
-    state = _run_state(checks={"passed": False, "failed": ["pytest"], "all_passed": False})
+    state = _run_state(
+        checks={"passed": False, "failed": ["pytest"], "all_passed": False}
+    )
     assert evaluate_predicate(predicate, state) is False
 
 
 def test_checks_predicate_failed_status_inverts() -> None:
     predicate = {"kind": "checks", "status": "failed"}
-    state = _run_state(checks={"passed": False, "failed": ["pytest"], "all_passed": False})
+    state = _run_state(
+        checks={"passed": False, "failed": ["pytest"], "all_passed": False}
+    )
     assert evaluate_predicate(predicate, state) is True
 
 
@@ -73,7 +77,12 @@ def test_paths_predicate_handles_star_glob() -> None:
 
 
 def test_output_predicate_matches_a_prior_stage_field() -> None:
-    predicate = {"kind": "output", "node": "review", "field": "verdict", "equals": "pass"}
+    predicate = {
+        "kind": "output",
+        "node": "review",
+        "field": "verdict",
+        "equals": "pass",
+    }
     state = _run_state(outputs={"review": {"verdict": "pass"}})
     assert evaluate_predicate(predicate, state) is True
     state = _run_state(outputs={"review": {"verdict": "fail"}})
@@ -81,9 +90,39 @@ def test_output_predicate_matches_a_prior_stage_field() -> None:
 
 
 def test_output_predicate_fails_when_node_missing() -> None:
-    predicate = {"kind": "output", "node": "review", "field": "verdict", "equals": "pass"}
+    predicate = {
+        "kind": "output",
+        "node": "review",
+        "field": "verdict",
+        "equals": "pass",
+    }
     state = _run_state(outputs={})
     assert evaluate_predicate(predicate, state) is False
+
+
+def test_labels_predicate_treats_string_labels_as_no_labels() -> None:
+    # a ticket with labels: "bug" (a bare string, not a list) must not
+    # match by character set or crash
+    predicate = {"kind": "labels", "labels": ["bug"]}
+    state = _run_state(ticket={"labels": "bug", "effort": "s"})
+    assert evaluate_predicate(predicate, state) is False
+
+
+def test_labels_predicate_treats_null_labels_as_no_labels() -> None:
+    predicate = {"kind": "labels", "labels": ["bug"]}
+    state = _run_state(ticket={"labels": None, "effort": "s"})
+    assert evaluate_predicate(predicate, state) is False
+
+
+def test_labels_predicate_ignores_non_string_entries() -> None:
+    predicate = {"kind": "labels", "labels": ["bug"]}
+    state = _run_state(ticket={"labels": ["bug", ["nested"]], "effort": "s"})
+    assert evaluate_predicate(predicate, state) is True
+
+
+def test_labels_predicate_treats_non_dict_ticket_as_no_labels() -> None:
+    predicate = {"kind": "labels", "labels": ["bug"]}
+    assert evaluate_predicate(predicate, {"ticket": None}) is False
 
 
 def test_evaluate_predicate_raises_on_unknown_kind() -> None:
@@ -92,7 +131,12 @@ def test_evaluate_predicate_raises_on_unknown_kind() -> None:
 
 
 def test_validate_predicate_accepts_output_kind() -> None:
-    predicate = {"kind": "output", "node": "review", "field": "verdict", "equals": "pass"}
+    predicate = {
+        "kind": "output",
+        "node": "review",
+        "field": "verdict",
+        "equals": "pass",
+    }
     assert validate_predicate(predicate) is None
 
 

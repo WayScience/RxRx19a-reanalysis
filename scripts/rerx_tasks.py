@@ -140,7 +140,13 @@ def cmd_prepare() -> None:
         )
         _log(f"pilot selection: {len(selected)} site rows (arm_scale={arm_scale})")
     selected.to_json(RUN_DIR / "selection.json", orient="records")
-    site_rows = {row["site_id"]: row for row in selected.to_dict("records")}
+    # pandas' JSON serialization maps pd.NA (empty treatments in real
+    # metadata) to null; to_dict("records") would leave pd.NA in the
+    # rows and crash json.dumps below.
+    site_rows = {
+        row["site_id"]: row
+        for row in json.loads(str(selected.to_json(orient="records")))
+    }
 
     image_sets = [
         ImageSetID(
@@ -174,7 +180,7 @@ def cmd_prepare() -> None:
             "experiment": str(experiment),
             "plate": str(plate),
             "shard_ids": plate_shards[(str(experiment), str(plate))],
-            "sites": group.to_dict("records"),
+            "sites": json.loads(str(group.to_json(orient="records"))),
         }
         (plate_dir / f"{plate_id}.json").write_text(json.dumps(payload))
     (RUN_DIR / "shard_plate_counts.tsv").write_text(

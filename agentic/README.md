@@ -8,17 +8,17 @@ stopped instead of starting over.
 
 ## The pieces
 
-| Path | What it does |
-| --- | --- |
-| `src/rerx/agentic/model.py` | Workflow documents and validation |
-| `src/rerx/agentic/predicates.py` | How a gate judges a run |
-| `src/rerx/agentic/skills.py` | Skill loading and output contracts |
-| `src/rerx/agentic/journal.py` | The JSONL event journal and replay |
-| `src/rerx/agentic/runner.py` | The walk over the graph |
-| `src/rerx/agentic/responders.py` | The responder protocol |
-| `src/rerx/agentic/cli.py` | The `rerx agent` commands |
-| `workflows/default.json` | The shipped loop |
-| `skills/<name>/SKILL.md` | Procedure skills |
+| Path                             | What it does                       |
+| -------------------------------- | ---------------------------------- |
+| `src/rerx/agentic/model.py`      | Workflow documents and validation  |
+| `src/rerx/agentic/predicates.py` | How a gate judges a run            |
+| `src/rerx/agentic/skills.py`     | Skill loading and output contracts |
+| `src/rerx/agentic/journal.py`    | The JSONL event journal and replay |
+| `src/rerx/agentic/runner.py`     | The walk over the graph            |
+| `src/rerx/agentic/responders.py` | The responder protocol             |
+| `src/rerx/agentic/cli.py`        | The `rerx agent` commands          |
+| `workflows/default.json`         | The shipped loop                   |
+| `skills/<name>/SKILL.md`         | Procedure skills                   |
 
 ## The shipped loop
 
@@ -34,7 +34,7 @@ attempt, and a terminal that hands the result to a person.
     {"id": "triage", "type": "llm", "skill": "triage", "max_retries": 1},
     {"id": "review", "type": "llm", "skill": "review", "max_retries": 0},
     {"id": "review-gate", "type": "flow", "kind": "gate", "predicate": {"kind": "output", "node": "review", "field": "verdict", "equals": "pass"}},
-    {"id": "checks", "type": "infra", "command": ["uv", "run", "--frozen", "pytest", "-q"]},
+    {"id": "checks", "type": "infra", "command": ["uv", "run", "--frozen", "pytest", "-q", "--no-cov"]},
     {"id": "gate", "type": "flow", "kind": "gate", "predicate": {"kind": "checks", "status": "passed"}},
     {"id": "done", "type": "term", "action": "needs_review"}
   ],
@@ -84,21 +84,28 @@ and an interrupted stage restarts with its next attempt.
 The journal is one JSON event per line, in the order the run wrote them:
 
 ```json
+{"event": "run_started", "node": "triage"}
 {"event": "node_started", "node": "triage", "attempt": 1}
-{"event": "node_completed", "node": "triage", "attempt": 1}
+{"event": "node_completed", "node": "triage", "attempt": 1, "output": {"category": "docs", "summary": "fix the docs", "changed_paths": ["docs/x.md"]}}
+{"event": "node_started", "node": "checks", "attempt": 1}
 {"event": "check_passed", "exit_code": 0, "node": "checks"}
+{"event": "node_completed", "node": "checks", "passed": true, "attempt": 1}
 {"event": "gate_passed", "node": "gate"}
 {"event": "term_reached", "action": "needs_review", "node": "done"}
 ```
+
+A failed run ends with a `run_failed` event carrying the reason; both
+that and `term_reached` are terminal, so re-running with the same
+journal returns the result without redoing stages.
 
 ## Writing a skill
 
 A skill is a directory with a `SKILL.md`: the procedure a model stage
 follows, plus an output contract the harness checks responses against
-before accepting them. The contract is a fenced ```json block under an
+before accepting them. The contract is a fenced \`\`\`json block under an
 `## Output contract` heading.
 
-```markdown
+````markdown
 # Plan
 
 Plan the change a ticket asks for.
@@ -120,8 +127,9 @@ Plan the change a ticket asks for.
   },
   "additionalProperties": false
 }
-```
-```
+````
+
+````
 
 A response that violates the contract is retried with the violations
 named, while the stage's `max_retries` allows.
@@ -144,7 +152,7 @@ named, while the stage's `max_retries` allows.
 ```bash
 uv run --frozen pytest tests/test_agentic_*.py -q
 uv run --frozen rerx agent validate agentic/workflows/default.json
-```
+````
 
 Every stage boundary writes to the journal before the work happens, so a
 crash leaves a position replay can fold and continue from. The loop

@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 
 from rerx.agentic.model import load_workflow, validate_document
-from rerx.agentic.runner import AgenticRunner
 from rerx.agentic.responders import CommandResponder
+from rerx.agentic.runner import AgenticRunner, RunResult
 
 
 class AgentCLI:
@@ -44,7 +44,7 @@ class AgentCLI:
             raise SystemExit(1)
         print(f"valid workflow document: {workflow}")
 
-    def run(
+    def run(  # noqa: PLR0913
         self,
         workflow: str,
         skills: str,
@@ -93,24 +93,31 @@ class AgentCLI:
             journal_path=Path(journal),
         )
         result = runner.run(ticket=parsed_ticket)
-        print(f"outcome: {result.outcome}")
-        if result.node is not None:
-            print(f"term: {result.node}")
-        if result.failed_reason is not None:
-            print(f"reason: {result.failed_reason}")
-        if result.changed_paths:
-            print("changed paths:")
-            for path in result.changed_paths:
-                print(f"- {path}")
-        for node_id, output in sorted(result.outputs.items()):
-            if "report" in output:
-                print(f"report ({node_id}):\n{output['report']}")
-            if "verdict" in output:
-                print(f"review verdict ({node_id}): {output['verdict']}")
-                for finding in output.get("findings", []):
-                    print(
-                        f"- {finding.get('file')}:{finding.get('line')}: "
-                        f"{finding.get('problem')}"
-                    )
+        _print_result(result)
         if result.outcome == "failed":
             raise SystemExit(1)
+
+
+def _print_result(result: RunResult) -> None:
+    """
+    Print a run's outcome and the evidence a person reads to judge it.
+    """
+    print(f"outcome: {result.outcome}")
+    if result.node is not None:
+        print(f"term: {result.node}")
+    if result.failed_reason is not None:
+        print(f"reason: {result.failed_reason}")
+    if result.changed_paths:
+        print("changed paths:")
+        for path in result.changed_paths:
+            print(f"- {path}")
+    for node_id, output in sorted(result.outputs.items()):
+        if "report" in output:
+            print(f"report ({node_id}):\n{output['report']}")
+        if "verdict" in output:
+            print(f"review verdict ({node_id}): {output['verdict']}")
+            for finding in output.get("findings", []):
+                print(
+                    f"- {finding.get('file')}:{finding.get('line')}: "
+                    f"{finding.get('problem')}"
+                )
