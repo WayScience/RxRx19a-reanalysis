@@ -30,7 +30,8 @@ class JournalPosition:
     attempts : dict[str, int]
         Highest attempt number recorded per node.
     completed_nodes : list[str]
-        Nodes that completed, in order (deduplicated, latest kept).
+        Nodes that completed, deduplicated and ordered by most recent
+        completion — the last entry is the latest node to finish.
     terminated : bool
         Whether the journal ends at a term node.
     term_action : str | None
@@ -159,6 +160,10 @@ def replay(events: list[dict]) -> JournalPosition:  # noqa: C901
             pending_loop_to = None
             attempts[node] = event.get("attempt", attempts.get(node, 0) + 1)
         elif name == "node_completed" and isinstance(node, str):
+            # move a re-completed node to the end: dict keys keep their
+            # first-insertion order otherwise, and _entry resumes from
+            # completed_nodes[-1], which must be the latest completion
+            completed.pop(node, None)
             completed[node] = None
             current_node = None
             output = event.get("output")

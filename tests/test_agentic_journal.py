@@ -184,11 +184,15 @@ def test_replay_clears_pending_loop_once_target_starts(tmp_path: Path) -> None:
     journal = Journal(path=tmp_path / "journal.jsonl")
     journal.append({"event": "run_started", "node": "plan"})
     journal.append({"event": "node_completed", "node": "plan", "attempt": 1})
+    journal.append({"event": "node_completed", "node": "checks", "passed": True})
     journal.append({"event": "gate_failed", "node": "gate", "looped_to": "plan"})
     journal.append({"event": "node_started", "node": "plan", "attempt": 2})
     journal.append({"event": "node_completed", "node": "plan", "attempt": 2})
     position = replay(load_journal(tmp_path / "journal.jsonl"))
     assert position.pending_loop_to is None
+    # re-completion moves plan to the end, so _entry resumes forward
+    # from plan (through checks), not from the stale pre-loop checks
+    assert position.completed_nodes[-1] == "plan"
 
 
 def test_replay_clears_pending_loop_on_gate_pass(tmp_path: Path) -> None:

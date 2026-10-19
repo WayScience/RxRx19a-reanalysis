@@ -457,6 +457,75 @@ def test_resume_restores_gate_state(tmp_path: Path) -> None:
     assert len(asked) == 1
 
 
+def test_resume_after_loop_target_recompletes_runs_checks_next(
+    tmp_path: Path,
+) -> None:
+    # plan completed, checks completed, the gate looped back to plan,
+    # and plan completed again -- then the process died. Resume must
+    # continue forward from plan (re-running checks with the new round),
+    # not jump straight to the gate with the stale pre-loop checks.
+    runner = _runner(tmp_path, lambda prompt: _valid_output(), command=["true"])
+    journal = tmp_path / "journal.jsonl"
+    journal.write_text(
+        json.dumps({"event": "run_started", "node": "plan"})
+        + "\n"
+        + json.dumps({"event": "node_started", "node": "plan", "attempt": 1})
+        + "\n"
+        + json.dumps(
+            {
+                "event": "node_completed",
+                "node": "plan",
+                "attempt": 1,
+                "output": {"summary": "v1", "changed_paths": ["src/a.py"]},
+            }
+        )
+        + "\n"
+        + json.dumps({"event": "node_started", "node": "checks", "attempt": 1})
+        + "\n"
+        + json.dumps(
+            {"event": "node_completed", "node": "checks", "passed": False, "attempt": 1}
+        )
+        + "\n"
+        + json.dumps({"event": "gate_failed", "node": "gate", "looped_to": "plan"})
+        + "\n"
+        + json.dumps({"event": "node_started", "node": "plan", "attempt": 2})
+        + "\n"
+        + json.dumps(
+            {
+                "event": "node_completed",
+                "node": "plan",
+                "attempt": 2,
+                "output": {"summary": "v2", "changed_paths": ["src/a.py"]},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    asked: list[str] = []
+
+    def ask(prompt: str) -> str:
+        asked.append(prompt)
+        return _valid_output()
+
+    runner.ask = ask
+    result = runner.run(ticket={"title": "t"})
+    # the fix round's checks ran again (the flag makes them pass), so
+    # the gate passes this time without re-asking plan
+    assert result.outcome == "needs_review"
+    assert asked == []
+    events = [
+        json.loads(line)
+        for line in journal.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    resumed = [
+        e["node"]
+        for e in events
+        if e["event"] == "node_started" and e["node"] == "checks"
+    ]
+    assert len(resumed) == 2
+
+
 def test_checks_accumulate_across_multiple_check_nodes(tmp_path: Path) -> None:
     # two check nodes: the gate must see both, and one failure fails it
     document = {
