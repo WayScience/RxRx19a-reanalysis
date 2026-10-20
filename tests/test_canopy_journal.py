@@ -1,12 +1,12 @@
 """
 Tests for the run journal: append-only JSONL events with resume
-(agentic harness, journal slice).
+(canopy harness, journal slice).
 """
 
 import json
 from pathlib import Path
 
-from rerx.agentic.journal import Journal, load_journal, replay
+from canopy.journal import Journal, load_journal, replay
 
 
 def _events(path: Path) -> list[dict]:

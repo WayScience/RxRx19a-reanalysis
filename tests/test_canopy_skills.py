@@ -1,13 +1,13 @@
 """
 Tests for the skill loader: procedure files, output contracts, and the
-responder protocol (agentic harness, skills slice).
+responder protocol (canopy harness, skills slice).
 """
 
 from pathlib import Path
 
 import pytest
 
-from rerx.agentic.skills import (
+from canopy.skills import (
     ContractViolation,
     LoadedSkill,
     load_skill,
@@ -127,7 +127,7 @@ def test_contract_violation_carries_errors() -> None:
 def test_responders_are_callables_declared_in_protocol() -> None:
     # the harness drives any backend through one protocol: a callable
     # (prompt) -> str, and the skills module re-exports it for tests
-    from rerx.agentic import skills as skills_module
+    from canopy import skills as skills_module
 
     assert callable(skills_module.load_skill)
     assert callable(skills_module.validate_output)

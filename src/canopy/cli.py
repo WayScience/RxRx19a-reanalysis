@@ -1,7 +1,7 @@
 """
 Agentic harness CLI: validate documents and run tickets.
 
-A thin mount over :mod:`rerx.agentic.runner` — everything real happens
+A thin mount over :mod:`canopy.runner` — everything real happens
 there and in tests; this module only parses arguments, wires the
 responder, and prints the outcome.
 """
@@ -13,9 +13,9 @@ import shutil
 import sys
 from pathlib import Path
 
-from rerx.agentic.model import load_workflow, validate_document
-from rerx.agentic.responders import CommandResponder
-from rerx.agentic.runner import AgenticRunner, RunResult
+from canopy.model import load_workflow, validate_document
+from canopy.responders import CommandResponder
+from canopy.runner import AgenticRunner, RunResult
 
 
 class AgentCLI:

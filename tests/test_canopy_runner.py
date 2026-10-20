@@ -1,7 +1,7 @@
 """
-Tests for the agentic runner: the walk over a workflow, with a scripted
+Tests for the canopy runner: the walk over a workflow, with a scripted
 responder, real subprocess checks, gate loops, and journal resume
-(agentic harness, runner slice).
+(canopy harness, runner slice).
 """
 
 import json
@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from rerx.agentic.model import load_workflow
-from rerx.agentic.responders import CommandResponder
-from rerx.agentic.runner import AgenticRunner, RunResult, extract_json
+from canopy.model import load_workflow
+from canopy.responders import CommandResponder
+from canopy.runner import AgenticRunner, RunResult, extract_json
 
 
 def _skills_dir(tmp_path: Path) -> Path:

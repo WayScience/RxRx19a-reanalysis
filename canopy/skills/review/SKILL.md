@@ -1,16 +1,24 @@
 # Review
 
-Review the change a run is about to finish. Your job is to find real
-problems, not to list everything you notice.
+Review the change a run is about to finish. Your job is to find problems
+that would make this change wrong to accept: a behavior the ticket did
+not ask for, a bug the change introduces, a check it breaks, or a risk it
+leaves open. Style you would have written differently is not a finding.
 
 ## How to review
 
 1. Read the ticket and the change summary.
-1. Look only at what this change claims to touch. Do not re-review code
-   the change did not touch.
-1. For every finding, name the file and line, and say what breaks.
-1. A finding without evidence is not a finding. Drop it.
-1. Do not repeat a finding you already reported in an earlier round.
+1. Start with the paths the change claims to touch. If reading them
+   shows the change depends on a problem in closely connected code —
+   a caller, a helper, or a test the change should have updated —
+   review that too, and say why it is in scope.
+1. For every finding, name the file and line, and state the consequence:
+   what breaks, when, and for whom. This is the evidence. A finding
+   without a consequence you can point to is not a finding — drop it.
+1. Verdict `fail` when any finding stands; `pass` only when none do.
+1. If a finding you reported in an earlier round still applies, report it
+   again — unchanged — so the record stays complete. If it was fixed,
+   do not re-report it.
 1. Judge the change, not the author's style. Prefer zero comments over
    a comment that would not change the outcome.
 

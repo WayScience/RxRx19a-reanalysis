@@ -60,7 +60,7 @@ package-dir = { "" = "src" }
 include-package-data = true
 [tool.setuptools.packages]
 find.where = [ "src" ]
-find.include = [ "rerx*" ]
+find.include = [ "canopy*", "rerx*" ]
 
 [tool.setuptools_scm]
 version_file = "src/rerx/_version.py"
@@ -110,7 +110,7 @@ per-file-ignores."__init__.py" = [ "F401" ]
 per-file-ignores."tests/*.py" = [ "ANN001", "ANN202", "PLR2004" ]
 
 [tool.vulture]
-paths = [ ".vulture_whitelist.py", "src/rerx", "tests" ]
+paths = [ ".vulture_whitelist.py", "src/canopy", "src/rerx", "tests" ]
 min_confidence = 90
 
 [tool.pytest]
@@ -118,6 +118,7 @@ min_confidence = 90
 pythonpath = [ "." ]
 addopts = [
   "--cov=rerx",
+  "--cov=canopy",
   "--cov-report=term-missing",
   "--cov-report=xml",
   "-m",

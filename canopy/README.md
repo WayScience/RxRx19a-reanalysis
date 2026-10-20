@@ -1,24 +1,29 @@
-# Agentic Workflow Harness
+# Canopy
 
-Runs tickets through a small, testable loop: a stage follows a written
-procedure, a check runs a real command, a gate holds the run until the
-checks pass, and the result lands in a terminal action a person can
-review. Every step is journaled, so an interrupted run resumes where it
-stopped instead of starting over.
+Canopy is a reusable workflow harness. It runs tickets through a small,
+testable loop: a stage follows a written procedure, a check runs a real
+command, a gate holds the run until the checks pass, and the result lands
+in a terminal action a person can review. Every step is journaled, so an
+interrupted run resumes where it stopped instead of starting over.
+
+A ticket is the request a run carries: a short description of the work
+(usually a project issue), optional labels, and an optional effort
+estimate (`xs`, `s`, `m`, `l`, `xl`). The harness is project-agnostic:
+workflow documents, skills, and the responder command are per-project.
 
 ## The pieces
 
-| Path                             | What it does                       |
-| -------------------------------- | ---------------------------------- |
-| `src/rerx/agentic/model.py`      | Workflow documents and validation  |
-| `src/rerx/agentic/predicates.py` | How a gate judges a run            |
-| `src/rerx/agentic/skills.py`     | Skill loading and output contracts |
-| `src/rerx/agentic/journal.py`    | The JSONL event journal and replay |
-| `src/rerx/agentic/runner.py`     | The walk over the graph            |
-| `src/rerx/agentic/responders.py` | The responder protocol             |
-| `src/rerx/agentic/cli.py`        | The `rerx agent` commands          |
-| `workflows/default.json`         | The shipped loop                   |
-| `skills/<name>/SKILL.md`         | Procedure skills                   |
+| Path                       | What it does                       |
+| -------------------------- | ---------------------------------- |
+| `src/canopy/model.py`      | Workflow documents and validation  |
+| `src/canopy/predicates.py` | How a gate judges a run            |
+| `src/canopy/skills.py`     | Skill loading and output contracts |
+| `src/canopy/journal.py`    | The JSONL event journal and replay |
+| `src/canopy/runner.py`     | The walk over the graph            |
+| `src/canopy/responders.py` | The responder protocol             |
+| `src/canopy/cli.py`        | The `rerx agent` command mount     |
+| `workflows/default.json`   | The shipped loop                   |
+| `skills/<name>/SKILL.md`   | Procedure skills                   |
 
 ## The shipped loop
 
@@ -50,12 +55,12 @@ attempt, and a terminal that hands the result to a person.
 }
 ```
 
-The review stage reads the change with the review skill's rules: findings
-need a file, a line, and what breaks; no repeats of findings already
-reported; judge the change, not the style. The review gate holds the run
-until the review's verdict is `pass`, so a run cannot finish with an open
-finding. Both gates loop back to triage, bounded by its `max_retries` —
-the loop's round cap.
+The review stage reads the change with the review skill's rules: every
+finding names a file, a line, and what breaks; a re-reported finding
+from an earlier round must say why it still stands; judge the change,
+not the style. The review gate holds the run until the review's verdict
+is `pass`, so a run cannot finish with an open finding. Both gates loop
+back to triage, bounded by its `max_retries` — the loop's round cap.
 
 ## Running a ticket
 
@@ -65,14 +70,14 @@ or use a stub for testing.
 
 ```bash
 # validate a document
-uv run --frozen rerx agent validate agentic/workflows/default.json
+uv run --frozen rerx agent validate canopy/workflows/default.json
 
 # run the example ticket
 uv run --frozen rerx agent run \
-  --workflow agentic/workflows/default.json \
-  --skills agentic/skills \
+  --workflow canopy/workflows/default.json \
+  --skills canopy/skills \
   --responder path/to/responder \
-  --ticket agentic/tickets/example.json \
+  --ticket canopy/tickets/example.json \
   --workdir . \
   --journal path/to/journal.jsonl
 ```
@@ -127,8 +132,7 @@ Plan the change a ticket asks for.
   },
   "additionalProperties": false
 }
-````
-
+```
 ````
 
 A response that violates the contract is retried with the violations
@@ -147,12 +151,19 @@ named, while the stage's `max_retries` allows.
   `output` (route on a prior stage's validated output — for example, a
   review stage's `verdict`).
 
+## Reusing Canopy in another project
+
+The `src/canopy` package has no rerx imports and mounts under any
+Python CLI. Copy the package, add one line that mounts `AgentCLI`, and
+write the project's own workflow document, skills, and responder. The
+`rerx agent` command here is one example of that mount.
+
 ## Verification
 
 ```bash
-uv run --frozen pytest tests/test_agentic_*.py -q
-uv run --frozen rerx agent validate agentic/workflows/default.json
-````
+uv run --frozen pytest tests/test_canopy_*.py -q
+uv run --frozen rerx agent validate canopy/workflows/default.json
+```
 
 Every stage boundary writes to the journal before the work happens, so a
 crash leaves a position replay can fold and continue from. The loop

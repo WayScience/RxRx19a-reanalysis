@@ -325,13 +325,15 @@ Everything else — sharding, container invocation, CytoTable conversion,
 crops, MorphEm embedding, the QC gate, buscar, fusion, the catalog, and
 the Nextflow/Slurm orchestration — works unchanged.
 
-## Agentic workflow harness
+## Canopy workflow harness
 
-`agentic/` holds a small harness that runs tickets through a journaled
-loop: a stage follows a written procedure skill, a check runs a real
-command, a gate holds the run until the checks pass, and a terminal hands
-the result to a person. See `agentic/README.md` for the document format,
-the skill format, and the `rerx agent` commands.
+`canopy/` holds Canopy, a reusable workflow harness that runs tickets
+through a journaled loop: a stage follows a written procedure skill, a
+check runs a real command, a gate holds the run until the checks pass,
+and a terminal hands the result to a person. The `src/canopy` package
+has no rerx imports, so it can be lifted to other projects as-is. See
+`canopy/README.md` for the document format, the skill format, and the
+`rerx agent` commands.
 
 ## References
 

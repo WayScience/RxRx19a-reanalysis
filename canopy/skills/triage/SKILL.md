@@ -3,6 +3,9 @@
 Decide what a ticket asks for and report it in the output contract's
 shape.
 
+A ticket is the request this run carries: usually a project issue, with
+a title, a body, optional labels, and an optional effort estimate.
+
 ## Steps
 
 1. Read the ticket.

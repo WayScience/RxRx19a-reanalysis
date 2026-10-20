@@ -1,5 +1,5 @@
 """
-Tests for the agentic CLI commands (agentic harness, CLI slice).
+Tests for the canopy CLI commands (canopy harness, CLI slice).
 """
 
 import json
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from rerx.agentic.cli import AgentCLI
+from canopy.cli import AgentCLI
 
 
 def test_validate_reports_a_valid_document(

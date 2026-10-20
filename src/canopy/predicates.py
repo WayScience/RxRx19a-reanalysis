@@ -4,7 +4,7 @@ Predicate evaluation: how a gate judges a run's state.
 A predicate is one structured test over the run's state — its check
 results, its ticket, or the paths its change touched. The evaluator is
 deliberately total: every predicate the document validator accepts
-(:func:`rerx.agentic.model.validate_predicate`) evaluates without
+(:func:`canopy.model.validate_predicate`) evaluates without
 surprise, and an unknown kind is a programming error, not a silent
 ``False``.
 """
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import fnmatch
 
-from rerx.agentic.model import validate_predicate
+from canopy.model import validate_predicate
 
 _EFFORT_ORDER = ("xs", "s", "m", "l", "xl")
 

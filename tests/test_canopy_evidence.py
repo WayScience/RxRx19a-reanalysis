@@ -1,13 +1,13 @@
 """
 Tests for the human-facing evidence in run results and CLI output
-(agentic harness, evidence slice).
+(canopy harness, evidence slice).
 """
 
 import json
 from pathlib import Path
 
-from rerx.agentic.model import load_workflow
-from rerx.agentic.runner import AgenticRunner
+from canopy.model import load_workflow
+from canopy.runner import AgenticRunner
 
 
 def _skills(tmp_path: Path) -> Path:

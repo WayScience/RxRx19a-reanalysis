@@ -1,6 +1,6 @@
 """
-Tests for agentic workflow documents: loading and validation
-(agentic harness, workflow model slice).
+Tests for canopy workflow documents: loading and validation
+(canopy harness, workflow model slice).
 """
 
 import json
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from rerx.agentic.model import Workflow, load_workflow, validate_document
+from canopy.model import Workflow, load_workflow, validate_document
 
 
 def _doc() -> dict:

@@ -1,19 +1,19 @@
 """
 Tests for predicate evaluation: how a gate judges a run's state
-(agentic harness, predicate slice).
+(canopy harness, predicate slice).
 """
 
 import pytest
 
-from rerx.agentic.model import validate_predicate
-from rerx.agentic.predicates import evaluate_predicate
+from canopy.model import validate_predicate
+from canopy.predicates import evaluate_predicate
 
 
 def _run_state(**overrides: object) -> dict:
     state = {
         "checks": {"passed": True, "failed": [], "all_passed": True},
         "ticket": {"labels": ["bug"], "effort": "s"},
-        "changed_paths": ["src/rerx/agentic/runner.py"],
+        "changed_paths": ["src/canopy/runner.py"],
         "outputs": {},
     }
     state.update(overrides)
@@ -64,7 +64,7 @@ def test_labels_predicate_requires_one_matching_label() -> None:
 
 
 def test_paths_predicate_matches_changed_paths() -> None:
-    predicate = {"kind": "paths", "glob": "src/rerx/**"}
+    predicate = {"kind": "paths", "glob": "src/canopy/**"}
     assert evaluate_predicate(predicate, _run_state()) is True
     state = _run_state(changed_paths=["docs/readme.md"])
     assert evaluate_predicate(predicate, state) is False
@@ -72,7 +72,7 @@ def test_paths_predicate_matches_changed_paths() -> None:
 
 def test_paths_predicate_handles_star_glob() -> None:
     predicate = {"kind": "paths", "glob": "tests/*"}
-    state = _run_state(changed_paths=["tests/test_agentic_model.py"])
+    state = _run_state(changed_paths=["tests/test_canopy_model.py"])
     assert evaluate_predicate(predicate, state) is True
 
 

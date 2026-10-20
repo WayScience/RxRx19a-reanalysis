@@ -20,10 +20,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from rerx.agentic.journal import Journal, JournalPosition, load_journal, replay
-from rerx.agentic.model import Node, Workflow
-from rerx.agentic.predicates import evaluate_predicate
-from rerx.agentic.skills import load_skill, validate_output
+from canopy.journal import Journal, JournalPosition, load_journal, replay
+from canopy.model import Node, Workflow
+from canopy.predicates import evaluate_predicate
+from canopy.skills import load_skill, validate_output
 
 Responder = Callable[[str], str]
 
