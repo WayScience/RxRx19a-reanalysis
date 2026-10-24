@@ -1,0 +1,50 @@
+version: "1.0"
+name: JPEG crop quality comparison
+
+description: |
+  plan.md section 14: before freezing the crop encoding, compare
+  MorphEm embeddings from stored JPEG crops against embeddings from
+  lossless in-memory crops. Keep JPEG only if the difference is
+  acceptable for this analysis.
+
+decisions:
+  crop_encoding:
+    label: Crop encoding
+    rationale: |
+      JPEG quality 95 shrinks crop Parquet files roughly tenfold, which
+      matters at full-run scale (12,768 shards). Lossless encoding
+      avoids compression artifacts but costs storage. The pilot exists
+      to measure whether JPEG 95 changes the embeddings this analysis
+      depends on.
+    default: jpeg_q95
+    options:
+      jpeg_q95:
+        label: JPEG quality 95
+        description: Crops stored as JPEG bytes in Parquet, as the pipeline stores them
+      lossless:
+        label: Lossless in-memory
+        description: Crops re-rendered from source PNGs via crop_site_cells, never JPEG-compressed
+
+outputs:
+  - id: embedding_distance
+    type: metric
+    decisions: [crop_encoding]
+    description: >
+      Mean pairwise distance between MorphEm embeddings of the same
+      cells under the two encodings, per plate.
+  - id: verdict
+    type: report
+    decisions: [crop_encoding]
+    description: >
+      Keep JPEG 95 or switch to lossless, with the measured difference
+      as evidence.
+
+universes:
+  stored-jpeg:
+    description: Embeddings from the pilot's stored JPEG crops
+    decisions:
+      crop_encoding: jpeg_q95
+  re-rendered-lossless:
+    description: Embeddings from lossless crops re-rendered via crop_site_cells
+    decisions:
+      crop_encoding: lossless

@@ -325,6 +325,13 @@ Everything else — sharding, container invocation, CytoTable conversion,
 crops, MorphEm embedding, the QC gate, buscar, fusion, the catalog, and
 the Nextflow/Slurm orchestration — works unchanged.
 
+## Experiment specs
+
+`experiments/` holds experiments written as specs before they run: every
+consequential choice is a decision with a written rationale, every output
+names the decisions that shape it, and each universe picks one option per
+decision. See `experiments/README.md` for the format and the validator.
+
 ## Canopy workflow harness
 
 `canopy/` holds Canopy, a reusable workflow harness that runs tickets
