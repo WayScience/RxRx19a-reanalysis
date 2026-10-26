@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -224,8 +225,37 @@ def _fake_finalize_profile(tasks, profiler: str, selection: pd.DataFrame) -> Pat
     )
 
 
-def test_plate_finalize_and_complete_write_success_only_at_end(
+def test_cytotable_id_failure_preserves_existing_shard(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from rerx import cytotable, validate
+
+    tasks = _load_tasks(monkeypatch, tmp_path)
+    shard_id, _me, _selected = _stage_one_plate_fixture(tasks, "HRCE-1-Plate1")
+    dest = tasks._shard_profiles_path(shard_id)
+    original = dest.read_bytes()
+    monkeypatch.setattr(
+        validate, "check_sqlite_integrity", lambda _path: SimpleNamespace(passed=True)
+    )
+
+    def convert(_source: Path, target: Path) -> Path:
+        pd.DataFrame({"new": [1]}).to_parquet(target, index=False)
+        return target
+
+    def fail_ids(_frame: pd.DataFrame) -> pd.DataFrame:
+        raise ValueError("bad cell identifiers")
+
+    monkeypatch.setattr(cytotable, "convert_sqlite_to_parquet", convert)
+    monkeypatch.setattr(cytotable, "add_cell_ids", fail_ids)
+    with pytest.raises(ValueError, match="bad cell identifiers"):
+        tasks.cmd_cytotable(shard_id)
+    assert dest.read_bytes() == original
+
+
+def test_plate_finalize_and_complete_write_success_only_at_end(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     from rerx import catalog
     from rerx.run_summary import PlateSummary
@@ -261,6 +291,33 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
 
     monkeypatch.setattr(tasks, "_finalize_profiles", fake_finalize)
     tasks.cmd_finalize_plate(plate_id)
+    output = capsys.readouterr().out
+    stages = [
+        "start",
+        "validate_start",
+        "validate_done",
+        "cellprofiler_load_start",
+        "cellprofiler_load_done",
+        "cellprofiler_write_raw_start",
+        "cellprofiler_write_raw_done",
+        "cellprofiler_finalize_start",
+        "cellprofiler_finalize_done",
+        "morphem_load_start",
+        "morphem_load_done",
+        "morphem_finalize_start",
+        "morphem_finalize_done",
+        "fusion_load_start",
+        "fusion_load_done",
+        "fusion_start",
+        "fusion_done",
+        "fusion_write_start",
+        "fusion_write_done",
+        "summary_write_start",
+        "done",
+    ]
+    positions = [output.index(f"plate={plate_id} stage={stage} ") for stage in stages]
+    assert positions == sorted(positions)
+    assert "rows=1 columns=" in output
     assert not (tasks.RUN_DIR / "_SUCCESS").exists()
     assert (tasks.RUN_DIR / "qc" / "plates" / f"{plate_id}.json").is_file()
 

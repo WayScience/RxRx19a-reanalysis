@@ -18,6 +18,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Literal
+from uuid import uuid4
 
 from rerx.manifest import sha256_file
 from rerx.metadata import CHANNELS, ImageSetID
@@ -340,6 +341,10 @@ def run_cellprofiler_shard(  # noqa: PLR0913, PLR0917
     Follows the atomic output rule (plan.md section 23): everything happens
     inside the shard's task directory; the caller is responsible for moving
     validated outputs into the durable run directory afterward.
+    Before retrying, a nonempty output directory is renamed to a unique
+    ``output.previous-<uuid>`` sibling, never deleted. Its log is saved as
+    ``output.previous-<uuid>.cellprofiler.log`` beside it. The new attempt
+    starts with an empty output directory; timeouts retain partial logs.
 
     Parameters
     ----------
@@ -382,6 +387,16 @@ def run_cellprofiler_shard(  # noqa: PLR0913, PLR0917
     source_root = Path(source_root).resolve()
     images_dir = stage_shard_images(shard, source_root, task_dir)
     output_dir = task_dir / "output"
+    log_path = task_dir / "cellprofiler.log"
+    if output_dir.is_symlink() or (output_dir.exists() and not output_dir.is_dir()):
+        raise ValueError(f"output path must be a real directory: {output_dir}")
+    if output_dir.is_dir() and any(output_dir.iterdir()):
+        previous_output = task_dir / f"output.previous-{uuid4().hex}"
+        output_dir.rename(previous_output)
+        if log_path.exists():
+            log_path.rename(
+                previous_output.with_name(f"{previous_output.name}.cellprofiler.log")
+            )
     output_dir.mkdir(parents=True, exist_ok=True)
     command = cellprofiler_command(
         images_dir=images_dir,
@@ -391,14 +406,23 @@ def run_cellprofiler_shard(  # noqa: PLR0913, PLR0917
         extra_binds=(source_root,),
         runtime=runtime,
     )
-    log_path = task_dir / "cellprofiler.log"
-    proc = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode(errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="replace")
+        log_path.write_text(f"$ {' '.join(command)}\n{stdout}\n{stderr}\n{exc}\n")
+        raise
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text(f"$ {' '.join(command)}\n{proc.stdout}\n{proc.stderr}\n")
     sqlite_path, mask_paths = collect_cellprofiler_outputs(output_dir)
