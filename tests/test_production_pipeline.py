@@ -327,6 +327,24 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
 
     monkeypatch.setattr(catalog, "build_run_catalog", fake_catalog)
     tasks.cmd_complete_full()
+    completion_output = capsys.readouterr().out
+    completion_stages = [
+        "start",
+        "validate_shards_start",
+        "validate_shards_done",
+        "validate_plates_start",
+        "validate_plates_done",
+        "write_summaries_start",
+        "write_summaries_done",
+        "catalog_start",
+        "catalog_done",
+        "success_marker_written",
+    ]
+    positions = [
+        completion_output.index(f"complete_full stage={stage} ")
+        for stage in completion_stages
+    ]
+    assert positions == sorted(positions)
     assert (tasks.RUN_DIR / "_SUCCESS").read_text() == tasks.RUN_ID + "\n"
     summary = json.loads((tasks.RUN_DIR / "run_summary.json").read_text())
     assert summary["totals"]["plates_finalized"] == 2

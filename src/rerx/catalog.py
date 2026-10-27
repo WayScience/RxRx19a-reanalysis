@@ -21,6 +21,8 @@ it never writes profile/crop data.
 from dataclasses import dataclass
 from pathlib import Path
 
+from rerx.diagnostics import log_stage
+
 # Table name -> glob (relative to the run root) of the Parquet files that
 # belong to it, per plan.md section 20's suggested table list. Tables
 # whose glob matches no files are skipped (a pilot run may not populate
@@ -108,11 +110,14 @@ def find_table_files(run_root: Path, glob: str) -> list[Path]:
     return sorted(Path(run_root).glob(glob))
 
 
-def build_run_catalog(
+def build_run_catalog(  # noqa: PLR0913 - retain positional API plus resource knobs
     run_root: Path,
     catalog_path: Path,
     data_path: Path,
     tables: dict[str, str] | None = None,
+    *,
+    memory_limit: str = "4GB",
+    threads: int = 2,
 ) -> CatalogBuildResult:
     """
     Build (or rebuild) a Frozen DuckLake catalog over one run's Parquet.
@@ -132,6 +137,11 @@ def build_run_catalog(
         in place; plan.md section 20: "Parquet remains canonical").
     tables : dict[str, str] | None
         Table name -> glob mapping. Defaults to :data:`CATALOG_TABLES`.
+    memory_limit : str
+        DuckDB buffer-manager limit, default ``"4GB"``. This is not a cap
+        on total process RSS; Arrow schemas and other allocations are extra.
+    threads : int
+        DuckDB worker threads, default 2. File schemas are read sequentially.
 
     Returns
     -------
@@ -145,6 +155,8 @@ def build_run_catalog(
         If ``run_root`` does not exist.
     """
     import duckdb
+    import pyarrow as pa
+    import pyarrow.parquet as pq
 
     run_root = Path(run_root)
     if not run_root.is_dir():
@@ -159,7 +171,13 @@ def build_run_catalog(
 
     table_globs = tables if tables is not None else CATALOG_TABLES
 
-    con = duckdb.connect()
+    con = duckdb.connect(
+        config={
+            "memory_limit": memory_limit,
+            "threads": threads,
+            "enable_external_file_cache": False,
+        }
+    )
     try:
         con.execute("INSTALL ducklake")
         con.execute("LOAD ducklake")
@@ -176,17 +194,52 @@ def build_run_catalog(
             if not files:
                 skipped.append(table)
                 continue
-            file_list = ", ".join(f"'{f}'" for f in files)
-            con.execute(
-                f"CREATE TABLE {table} AS "
-                f"SELECT * FROM read_parquet([{file_list}], union_by_name=true) LIMIT 0"
+            log_stage("stage=catalog event=schema_start", table=table, files=len(files))
+            # Retain only the accumulated union and one footer schema, never
+            # an all-file DuckDB relation or a list of every file's metadata.
+            schema = pq.read_schema(files[0]).remove_metadata()
+            for file in files[1:]:
+                schema = pa.unify_schemas(
+                    [schema, pq.read_schema(file).remove_metadata()],
+                    promote_options="permissive",
+                )
+            # An empty Arrow table carries types only; no profile cells are
+            # read or copied. Release its registration immediately after DDL.
+            con.register(
+                "_rerx_catalog_schema", pa.Table.from_batches([], schema=schema)
             )
-            for f in files:
+            try:
+                con.execute(
+                    f"CREATE TABLE {table} AS SELECT * FROM _rerx_catalog_schema"
+                )
+            finally:
+                con.unregister("_rerx_catalog_schema")
+            log_stage(
+                "stage=catalog event=schema_end",
+                table=table,
+                files=len(files),
+                columns=len(schema),
+            )
+            for registered, f in enumerate(files, start=1):
                 con.execute(
                     "CALL ducklake_add_data_files(?, ?, ?, allow_missing => true)",
                     ["rerx_catalog", table, str(f)],
                 )
+                if registered % 100 == 0 or registered == len(files):
+                    log_stage(
+                        "stage=catalog event=register_progress",
+                        table=table,
+                        registered=registered,
+                        files=len(files),
+                    )
+            log_stage("stage=catalog event=verify_start", table=table, files=len(files))
             row_count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+            log_stage(
+                "stage=catalog event=table_end",
+                table=table,
+                files=len(files),
+                rows=int(row_count[0]) if row_count else 0,
+            )
             results.append(
                 CatalogTableResult(
                     table=table,

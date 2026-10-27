@@ -44,6 +44,12 @@ Use a disciplined triage loop: reproduce, localize, reduce, fix, and guard again
 - Run progress loggers with the pinned project interpreter and explicit scheduler paths.
 - Treat scheduler-command errors as unknown status, not as zero running jobs.
 - Verify that the watcher produces a fresh snapshot on the same node as the workflow head.
+- Bound DuckDB memory and threads explicitly inside Slurm jobs; the memory setting is not a total process RSS limit.
+- Infer wide-table union schemas incrementally from Parquet footers rather than binding all shard files in one DuckDB query.
+- Preserve compatible type promotion and plate-specific columns when changing catalog schema discovery.
+- Test a catalog against real plate outputs and query it from a fresh connection before full-scale publishing.
+- Check scheduler minimum memory as well as per-CPU caps; Alpine `mem-normal` requires at least 240 GB per job.
+- Preserve an interrupted catalog and its WAL together before rebuilding; do not alter its referenced scientific Parquet files.
 
 ## Suggested commands
 

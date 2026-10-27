@@ -1031,9 +1031,11 @@ def _accumulate_fusion(fusion: dict | None, plate_fusion: dict) -> dict:
 def cmd_complete_full() -> None:
     """Aggregate every plate and mark a full run successful only when complete."""
     from rerx.catalog import build_run_catalog
+    from rerx.diagnostics import log_stage
     from rerx.fuse import write_fusion_sidecar
     from rerx.run_summary import RunSummary, write_run_summary
 
+    log_stage("complete_full stage=start", run_id=RUN_ID)
     plans = sorted((RUN_DIR / "plate-plans").glob("*.json"))
     expected = {path.stem for path in plans}
     observed = {path.stem for path in (RUN_DIR / "qc" / "plates").glob("*.json")}
@@ -1053,6 +1055,7 @@ def cmd_complete_full() -> None:
             f"plate plans omit {len(expected_shards - planned_shards)} shards "
             f"from shards.json; unexpected {len(planned_shards - expected_shards)}"
         )
+    log_stage("complete_full stage=validate_shards_start", shards=len(expected_shards))
     _verify_planned_shards(
         expected_shards,
         sorted((SCRATCH / RUN_ID / "cytotable").glob("*.parquet")),
@@ -1060,8 +1063,10 @@ def cmd_complete_full() -> None:
         sorted((RUN_DIR / "profiles" / "morphem" / "raw").glob("*.parquet")),
         sorted(SCRATCH.glob(f"{RUN_ID}/*/output/*.sqlite")),
     )
+    log_stage("complete_full stage=validate_shards_done", shards=len(expected_shards))
     summaries = []
     fusion: dict | None = None
+    log_stage("complete_full stage=validate_plates_start", plates=len(expected))
     for plate_id in sorted(expected):
         result = json.loads(
             (RUN_DIR / "qc" / "plates" / f"{plate_id}.json").read_text()
@@ -1070,6 +1075,8 @@ def cmd_complete_full() -> None:
         summaries.extend(_verify_completed_plate(plate_id, plan, result))
         fusion = _accumulate_fusion(fusion, result["fusion"])
     assert fusion is not None
+    log_stage("complete_full stage=validate_plates_done", plates=len(expected))
+    log_stage("complete_full stage=write_summaries_start")
     write_fusion_sidecar(RUN_DIR, fusion)
     write_run_summary(
         RunSummary(
@@ -1079,12 +1086,16 @@ def cmd_complete_full() -> None:
         ),
         RUN_DIR / "run_summary.json",
     )
+    log_stage("complete_full stage=write_summaries_done")
+    log_stage("complete_full stage=catalog_start")
     build_run_catalog(
         run_root=RUN_DIR,
         catalog_path=RUN_DIR / "catalog" / "run.ducklake",
         data_path=RUN_DIR / "catalog" / "ducklake_data",
     )
+    log_stage("complete_full stage=catalog_done")
     (RUN_DIR / "_SUCCESS").write_text(RUN_ID + "\n")
+    log_stage("complete_full stage=success_marker_written")
     _log(f"full run complete: {len(expected)} plates -> {RUN_DIR}")
 
 
