@@ -118,6 +118,35 @@ def test_validate_output_rejects_unknown_field() -> None:
     assert any("extra" in error for error in errors)
 
 
+def test_validate_output_enforces_empty_when() -> None:
+    # a contract may carry a cross-field rule: this one pins the
+    # review skill's honesty invariant — pass means no findings
+    contract = {
+        "type": "object",
+        "required": ["verdict", "findings"],
+        "properties": {
+            "verdict": {"type": "string", "enum": ["pass", "fail"]},
+            "findings": {"type": "array", "items": {"type": "object"}},
+        },
+        "additionalProperties": False,
+        "empty_when": [
+            {"when_field": "verdict", "equals": "pass", "fields": ["findings"]}
+        ],
+    }
+    ok = validate_output({"verdict": "pass", "findings": []}, contract)
+    assert ok == []
+    rubber_stamp = validate_output(
+        {"verdict": "pass", "findings": [{"file": "a.py", "line": 1, "problem": "p"}]},
+        contract,
+    )
+    assert any("findings" in error for error in rubber_stamp)
+    fail_with_findings = validate_output(
+        {"verdict": "fail", "findings": [{"file": "a.py", "line": 1, "problem": "p"}]},
+        contract,
+    )
+    assert fail_with_findings == []
+
+
 def test_contract_violation_carries_errors() -> None:
     violation = ContractViolation("category: required field missing", errors=["x"])
     assert violation.errors == ["x"]

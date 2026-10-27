@@ -171,6 +171,35 @@ def _check_schema(  # noqa: C901, PLR0912
     return errors
 
 
+def _check_empty_when(output: dict, contract: dict) -> list[str]:
+    """
+    Check a contract's ``empty_when`` rule: when a field holds a given
+    value, other fields must be empty.
+
+    The rule is a list of objects with ``when_field``, ``equals``, and
+    ``fields``. It exists for honesty invariants like the review
+    skill's: a ``pass`` verdict must carry no findings.
+    """
+    errors: list[str] = []
+    for rule in contract.get("empty_when", []):
+        if not isinstance(rule, dict):
+            continue
+        when_field = rule.get("when_field")
+        equals = rule.get("equals")
+        if when_field is None or when_field not in output:
+            continue
+        if output[when_field] != equals:
+            continue
+        for must_be_empty in rule.get("fields", []):
+            value = output.get(must_be_empty)
+            if value:
+                errors.append(
+                    f"output.{must_be_empty}: must be empty when "
+                    f"{when_field} is {equals!r}"
+                )
+    return errors
+
+
 def validate_output(output: object, contract: dict) -> list[str]:
     """
     Check a responder's output against a skill's contract.
@@ -187,4 +216,7 @@ def validate_output(output: object, contract: dict) -> list[str]:
     list[str]
         Every problem found, one line each; empty when output matches.
     """
-    return _check_schema(output, contract, "output")
+    errors = _check_schema(output, contract, "output")
+    if isinstance(output, dict):
+        errors.extend(_check_empty_when(output, contract))
+    return errors

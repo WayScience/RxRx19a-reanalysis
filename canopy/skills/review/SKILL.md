@@ -54,6 +54,9 @@ A summary is evidence of what was attempted, never proof it worked.
     },
     "changed_paths": {"type": "array", "items": {"type": "string"}}
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "empty_when": [
+    {"when_field": "verdict", "equals": "pass", "fields": ["findings"]}
+  ]
 }
 ```
