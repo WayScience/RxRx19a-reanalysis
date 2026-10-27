@@ -15,6 +15,7 @@ This repository includes local agent guidance in `.agents/skills/`.
   - `.agents/skills/debugging-and-error-recovery/SKILL.md`
   - `.agents/skills/learning-opportunities/SKILL.md`
   - `.agents/skills/simple-english/SKILL.md`
+  - `.agents/skills/crop-storage-estimation/SKILL.md`
 
 ## How to use these skills
 

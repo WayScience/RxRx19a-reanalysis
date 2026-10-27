@@ -13,6 +13,7 @@ from rerx.cytotable import (
     OBJECT_NUMBER_COLUMNS,
     SchemaCheckResult,
     add_cell_ids,
+    atomic_parquet_output,
     check_schema_consistency,
     convert_sqlite_to_parquet,
     make_cell_id,
@@ -196,3 +197,96 @@ def test_convert_sqlite_to_parquet_missing_source_raises(tmp_path: Path) -> None
             tmp_path / "does_not_exist.sqlite",
             tmp_path / "out.parquet",
         )
+
+
+@pytest.mark.parametrize("old_is_directory", [False, True])
+def test_convert_retry_uses_fresh_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, old_is_directory: bool
+) -> None:
+    import cytotable
+
+    source = tmp_path / "shard.sqlite"
+    source.touch()
+    dest = tmp_path / "shard.parquet"
+    if old_is_directory:
+        dest.mkdir()
+        (dest / "partial.txt").write_text("previous attempt")
+    else:
+        dest.write_bytes(b"previous attempt")
+
+    def convert(*, dest_path: str, **_kwargs: object) -> str:
+        target = Path(dest_path)
+        if target.exists():
+            raise RuntimeError(
+                "An existing file or directory was provided as dest_path"
+            )
+        _sample_profiles().to_parquet(target, index=False)
+        return str(target)
+
+    monkeypatch.setattr(cytotable, "convert", convert)
+    result = convert_sqlite_to_parquet(source, dest, joins="SELECT 1")
+    assert result == dest
+    pd.testing.assert_frame_equal(pd.read_parquet(dest), _sample_profiles())
+    if old_is_directory:
+        backups = list(tmp_path.glob("shard.parquet.previous-*"))
+        assert len(backups) == 1
+        assert (backups[0] / "partial.txt").read_text() == "previous attempt"
+    assert not list(tmp_path.glob("*.attempt-*"))
+
+
+@pytest.mark.parametrize("old_is_directory", [False, True])
+def test_atomic_parquet_failure_preserves_previous_output(
+    tmp_path: Path, old_is_directory: bool
+) -> None:
+    dest = tmp_path / "shard.parquet"
+    original = dest
+    if old_is_directory:
+        dest.mkdir()
+        original = dest / "partial.txt"
+    original.write_bytes(b"previous attempt")
+    with (
+        pytest.raises(RuntimeError, match="interrupted"),
+        atomic_parquet_output(dest) as staged,
+    ):
+        staged.write_bytes(b"incomplete")
+        raise RuntimeError("interrupted")
+    assert original.read_bytes() == b"previous attempt"
+    assert not list(tmp_path.glob("*.attempt-*"))
+    assert not list(tmp_path.glob("*.previous-*"))
+
+
+def test_atomic_parquet_rejects_invalid_replacement(tmp_path: Path) -> None:
+    dest = tmp_path / "shard.parquet"
+    dest.write_bytes(b"previous attempt")
+    with pytest.raises(pa.ArrowInvalid), atomic_parquet_output(dest) as staged:
+        staged.write_bytes(b"truncated")
+    assert dest.read_bytes() == b"previous attempt"
+
+
+def test_atomic_parquet_rejects_symlink_destination(tmp_path: Path) -> None:
+    target = tmp_path / "original.parquet"
+    target.write_bytes(b"original")
+    dest = tmp_path / "shard.parquet"
+    dest.symlink_to(target)
+    with pytest.raises(ValueError, match="symlink"), atomic_parquet_output(dest):
+        pytest.fail("must reject symlinks before conversion")
+    assert target.read_bytes() == b"original"
+
+
+def test_atomic_parquet_restores_directory_when_publish_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dest = tmp_path / "shard.parquet"
+    dest.mkdir()
+    (dest / "partial.txt").write_text("previous attempt")
+
+    def fail_replace(_self: Path, _target: Path) -> Path:
+        raise OSError("publish failed")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with (
+        pytest.raises(OSError, match="publish failed"),
+        atomic_parquet_output(dest) as staged,
+    ):
+        _sample_profiles().to_parquet(staged)
+    assert (dest / "partial.txt").read_text() == "previous attempt"

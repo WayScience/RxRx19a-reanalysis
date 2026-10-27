@@ -140,7 +140,13 @@ def cmd_prepare() -> None:
         )
         _log(f"pilot selection: {len(selected)} site rows (arm_scale={arm_scale})")
     selected.to_json(RUN_DIR / "selection.json", orient="records")
-    site_rows = {row["site_id"]: row for row in selected.to_dict("records")}
+    # pandas' JSON serialization maps pd.NA (empty treatments in real
+    # metadata) to null; to_dict("records") would leave pd.NA in the
+    # rows and crash json.dumps below.
+    site_rows = {
+        row["site_id"]: row
+        for row in json.loads(str(selected.to_json(orient="records")))
+    }
 
     image_sets = [
         ImageSetID(
@@ -174,7 +180,7 @@ def cmd_prepare() -> None:
             "experiment": str(experiment),
             "plate": str(plate),
             "shard_ids": plate_shards[(str(experiment), str(plate))],
-            "sites": group.to_dict("records"),
+            "sites": json.loads(str(group.to_json(orient="records"))),
         }
         (plate_dir / f"{plate_id}.json").write_text(json.dumps(payload))
     (RUN_DIR / "shard_plate_counts.tsv").write_text(
@@ -288,6 +294,7 @@ def cmd_cytotable(shard_id: str) -> None:
 
     from rerx.cytotable import (
         add_cell_ids,
+        atomic_parquet_output,
         convert_sqlite_to_parquet,
         validate_unique_cell_ids,
     )
@@ -300,12 +307,13 @@ def cmd_cytotable(shard_id: str) -> None:
 
     dest = _shard_profiles_path(shard_id)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    parquet_path = convert_sqlite_to_parquet(sqlite_path, dest)
-    profiles = pd.read_parquet(parquet_path)
-    profiles = add_cell_ids(profiles)
-    validate_unique_cell_ids(profiles)
-    profiles.to_parquet(parquet_path, index=False)
-    _log(f"{shard_id}: {len(profiles)} single cells -> {parquet_path}")
+    with atomic_parquet_output(dest) as staged:
+        parquet_path = convert_sqlite_to_parquet(sqlite_path, staged)
+        profiles = pd.read_parquet(parquet_path)
+        profiles = add_cell_ids(profiles)
+        validate_unique_cell_ids(profiles)
+        profiles.to_parquet(staged, index=False)
+    _log(f"{shard_id}: {len(profiles)} single cells -> {dest}")
 
 
 def cmd_crops(shard_id: str) -> None:
@@ -778,12 +786,21 @@ def _verify_planned_shards(
             raise ValueError(f"{name}: empty or absent artifacts: {empty[:3]}")
 
 
-def cmd_finalize_plate(plate_id: str) -> None:
-    """Validate, finalize, and fuse one complete plate in a Slurm task."""
+def cmd_finalize_plate(plate_id: str) -> None:  # noqa: PLR0915
+    """Validate, finalize, and fuse one plate, with diagnostic stage boundaries."""
     import pandas as pd
 
+    from rerx.diagnostics import log_stage
     from rerx.fuse import fuse_features, fusion_metadata, write_fused_profiles
 
+    def progress(
+        stage: str, frame: pd.DataFrame | None = None, **details: object
+    ) -> None:
+        if frame is not None:
+            details.update(rows=len(frame), columns=frame.shape[1])
+        log_stage(f"plate={plate_id} stage={stage}", **details)
+
+    progress("start", slurm_job_id=os.environ.get("SLURM_JOB_ID", "local"))
     plan_path = RUN_DIR / "plate-plans" / f"{plate_id}.json"
     with plan_path.open() as fh:
         plan = json.load(fh)
@@ -795,25 +812,34 @@ def cmd_finalize_plate(plate_id: str) -> None:
         RUN_DIR / "profiles" / "morphem" / "raw" / f"{sid}.parquet" for sid in shard_ids
     ]
     sqlite = [_shard_sqlite(sid) for sid in shard_ids]
+    progress("validate_start", shards=len(shard_ids))
     _verify_planned_shards(set(shard_ids), cytotable, crops, morphem, sqlite)
     validation = _validate_run_streaming(
         cytotable, sqlite, RUN_DIR / "crops" / "cells", crop_paths=crops
     )
+    progress("validate_done", shards=len(shard_ids))
     metadata = pd.DataFrame(plan["sites"])
     key = (experiment, plate)
     part = f"experiment={experiment}/plate={plate}"
 
+    progress("cellprofiler_load_start", shards=len(cytotable))
     cp_frame = pd.concat(
         [pd.read_parquet(path) for path in cytotable], ignore_index=True
     )
+    progress("cellprofiler_load_done", cp_frame)
     cp_raw = RUN_DIR / "profiles" / "cellprofiler" / "raw" / part / "profiles.parquet"
     cp_raw.parent.mkdir(parents=True, exist_ok=True)
+    progress("cellprofiler_write_raw_start", cp_frame)
     cp_frame.to_parquet(cp_raw, index=False, compression="zstd")
+    progress("cellprofiler_write_raw_done", cp_frame)
+    progress("cellprofiler_finalize_start", cp_frame)
     summaries = _finalize_profiles(
         iter([(key, cp_frame)]), "cellprofiler", buscar=True, selection=metadata
     )
     del cp_frame
+    progress("cellprofiler_finalize_done")
 
+    progress("morphem_load_start", shards=len(morphem))
     me_frame = pd.concat([pd.read_parquet(path) for path in morphem], ignore_index=True)
     me_frame = me_frame.rename(
         columns={
@@ -823,10 +849,13 @@ def cmd_finalize_plate(plate_id: str) -> None:
             "Metadata_site": "Image_Metadata_Site",
         }
     )
+    progress("morphem_load_done", me_frame)
+    progress("morphem_finalize_start", me_frame)
     summaries += _finalize_profiles(
         iter([(key, me_frame)]), "morphem", buscar=True, selection=metadata
     )
     del me_frame
+    progress("morphem_finalize_done")
 
     cp_path = (
         RUN_DIR
@@ -844,9 +873,17 @@ def cmd_finalize_plate(plate_id: str) -> None:
         / part
         / "profiles.parquet"
     )
+    progress("fusion_load_start")
     cp_selected, me_selected = pd.read_parquet(cp_path), pd.read_parquet(me_path)
+    progress(
+        "fusion_load_done", cp_rows=len(cp_selected), morphem_rows=len(me_selected)
+    )
+    progress("fusion_start")
     fused = fuse_features(cp_selected, me_selected)
+    progress("fusion_done", fused)
+    progress("fusion_write_start", fused)
     written = write_fused_profiles(fused, RUN_DIR, write_sidecar=False)
+    progress("fusion_write_done", fused)
     if len(written) != 1:
         raise ValueError(f"expected one fused partition for {plate_id}: {written}")
     fusion = fusion_metadata(
@@ -854,6 +891,7 @@ def cmd_finalize_plate(plate_id: str) -> None:
     )
     summary_path = RUN_DIR / "qc" / "plates" / f"{plate_id}.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
+    progress("summary_write_start")
     summary_path.write_text(
         json.dumps(
             {
@@ -867,6 +905,7 @@ def cmd_finalize_plate(plate_id: str) -> None:
         )
         + "\n"
     )
+    progress("done")
     _log(f"finalized {plate_id} -> {summary_path}")
 
 

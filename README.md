@@ -123,8 +123,9 @@ uv run poe run_full
 ```
 
 `uv run poe run_full` pins `RERX_SCOPE=full` and, unless you already set
-`RERX_RUN_ID` yourself (to resume an existing run), generates a fresh
-timestamped `rxrx19a-full-<UTC>-g<sha>` ID. Use `uv run poe run_pilot` the
+`RERX_RUN_ID` yourself, generates a fresh timestamped
+`rxrx19a-full-<UTC>-g<sha>` ID. To resume an incomplete run, set both
+`RERX_RUN_ID` and `RERX_RESUME=1`. Use `uv run poe run_pilot` the
 same way for a pilot run; it pins `RERX_SCOPE=pilot`. Both wrap
 `scripts/alpine_launch.sh` (see `pyproject.toml`'s `[tool.poe.tasks]`),
 so scope can't be set to the wrong value by a stale environment
@@ -323,6 +324,23 @@ you port this pipeline to a different imaging dataset:
 Everything else — sharding, container invocation, CytoTable conversion,
 crops, MorphEm embedding, the QC gate, buscar, fusion, the catalog, and
 the Nextflow/Slurm orchestration — works unchanged.
+
+## Experiment specs
+
+`experiments/` holds experiments written as specs before they run: every
+consequential choice is a decision with a written rationale, every output
+names the decisions that shape it, and each universe picks one option per
+decision. See `experiments/README.md` for the format and the validator.
+
+## Canopy workflow harness
+
+`canopy/` holds Canopy, a reusable workflow harness that runs tickets
+through a journaled loop: a stage follows a written procedure skill, a
+check runs a real command, a gate holds the run until the checks pass,
+and a terminal hands the result to a person. The `src/canopy` package
+has no rerx imports, so it can be lifted to other projects as-is. See
+`canopy/README.md` for the document format, the skill format, and the
+`rerx agent` commands.
 
 ## References
 
