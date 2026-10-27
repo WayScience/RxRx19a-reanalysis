@@ -27,6 +27,7 @@ params.sif        = params.sif        ?: System.getenv('RERX_SIF')
 params.morphem_sif = params.morphem_sif ?: System.getenv('RERX_MORPHEM_SIF')
 params.shard_size = params.shard_size ?: '24'
 params.pilot_scale = params.pilot_scale ?: '1'
+params.scope = params.scope ?: System.getenv('RERX_SCOPE') ?: 'pilot'
 
 def rerxEnv = """
 export RERX_REPO='${params.repo}'
@@ -38,6 +39,7 @@ export RERX_MORPHEM_SIF='${params.morphem_sif}'
 export RERX_RUN_ID='${params.run_id}'
 export RERX_SHARD_SIZE='${params.shard_size}'
 export RERX_PILOT_SCALE='${params.pilot_scale}'
+export RERX_SCOPE='${params.scope}'
 """
 
 process PREPARE {
@@ -45,13 +47,14 @@ process PREPARE {
 
     output:
     path 'shard_ids.txt', emit: ids
+    path 'shard_plate_counts.tsv', emit: plate_counts
 
     script:
     """
     ${rerxEnv}
     ${params.python} ${params.repo}/scripts/rerx_tasks.py prepare
-    ${params.python} ${params.repo}/scripts/rerx_tasks.py download
     python3 -c "import json, os; plan = json.load(open(os.environ['RERX_RUN_DIR'] + '/shards.json')); print('\\n'.join(s['shard_id'] for s in plan))" > shard_ids.txt
+    cp ${params.run_dir}/shard_plate_counts.tsv shard_plate_counts.tsv
     """
 }
 
@@ -67,6 +70,7 @@ process CELLPROFILER {
     script:
     """
     ${rerxEnv}
+    ${params.python} ${params.repo}/scripts/rerx_tasks.py download ${shard_id}
     ${params.python} ${params.repo}/scripts/rerx_tasks.py cellprofiler ${shard_id}
     """
 }
@@ -119,6 +123,37 @@ process MORPHEM {
     """
 }
 
+process FINALIZE_PLATE {
+    tag "${plate_id}"
+    input:
+    val plate_id
+
+    output:
+    val plate_id, emit: ids
+
+    script:
+    """
+    ${rerxEnv}
+    ${params.python} ${params.repo}/scripts/rerx_tasks.py finalize-plate ${plate_id}
+    """
+}
+
+process COMPLETE_FULL {
+    tag 'complete-full'
+    input:
+    val plates_done
+
+    output:
+    path '_SUCCESS', emit: done
+
+    script:
+    """
+    ${rerxEnv}
+    ${params.python} ${params.repo}/scripts/rerx_tasks.py complete-full
+    cp ${params.run_dir}/_SUCCESS _SUCCESS
+    """
+}
+
 process FINALIZE {
     tag 'finalize'
 
@@ -134,6 +169,7 @@ process FINALIZE {
     ${params.python} ${params.repo}/scripts/rerx_tasks.py finalize
     ${params.python} ${params.repo}/scripts/rerx_tasks.py recursion-buscar
     ${params.python} ${params.repo}/scripts/rerx_tasks.py projection
+    ${params.python} ${params.repo}/scripts/rerx_tasks.py publish
     cp ${params.run_dir}/_SUCCESS _SUCCESS
     """
 }
@@ -144,5 +180,19 @@ workflow {
     CYTOTABLE(CELLPROFILER.out.ids)
     CROPS(CYTOTABLE.out.ids)
     MORPHEM(CROPS.out.ids)
-    FINALIZE(MORPHEM.out.ids.collect())
+    if (params.scope == 'full') {
+        shard_groups = PREPARE.out.plate_counts
+            .splitCsv(sep: '\t')
+            .map { row -> tuple(row[0], groupKey(row[1], row[2] as int)) }
+        plate_ids = MORPHEM.out.ids
+            .map { id -> tuple(id, id) }
+            .join(shard_groups)
+            .map { id, completed_id, key -> tuple(key, id) }
+            .groupTuple()
+            .map { key, shard_ids -> key.getGroupTarget() }
+        FINALIZE_PLATE(plate_ids)
+        COMPLETE_FULL(FINALIZE_PLATE.out.ids.collect())
+    } else {
+        FINALIZE(MORPHEM.out.ids.collect())
+    }
 }

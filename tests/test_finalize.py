@@ -7,7 +7,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
+import rerx.finalize as finalize_module
 from rerx.finalize import PlateFinalizeResult, finalize_plate
 
 
@@ -161,6 +163,34 @@ def test_finalize_plate_control_separation_flags_bad_plate(tmp_path: Path) -> No
     assert result.buscar_skipped_reason is not None
 
 
+def test_finalize_plate_keep_frames_false_frees_frames_but_keeps_counts(
+    tmp_path: Path,
+) -> None:
+    # Production plates OOM'd when annotated/normalized/feature_selected
+    # all stayed live; keep_frames=False frees them but must still report
+    # true counts (the run summary reads the count fields, not the frames).
+    raw = _plate_raw_profiles().drop(
+        columns=["_disease_condition", "_treatment", "_treatment_conc"]
+    )
+    result = finalize_plate(
+        raw_profiles=raw,
+        site_metadata=_site_metadata(),
+        run_dir=tmp_path / "run",
+        experiment="HRCE-1",
+        plate="25",
+        keep_frames=False,
+    )
+    assert len(result.annotated) == 0
+    assert len(result.normalized) == 0
+    assert len(result.feature_selected) == 0
+    assert result.n_cells_normalized == len(raw) - result.n_cells_flagged_outlier
+    assert result.n_cells_feature_selected > 0
+    assert result.n_feature_selected_cols > 0
+    assert result.normalized_path.is_file()
+    assert result.feature_selected_path.is_file()
+    assert result.buscar is not None
+
+
 def test_finalize_plate_buscar_keeps_profiler_label(tmp_path: Path) -> None:
     # buscar outputs must carry the profiler the plate was finalized
     # with (summary filename + "profiler" field), not the default label.
@@ -253,3 +283,99 @@ def test_finalize_plate_flags_and_drops_cosmicqc_outliers(tmp_path: Path) -> Non
     assert result.n_cells_flagged_outlier >= 2
     assert len(result.normalized) == len(raw) - result.n_cells_flagged_outlier
     assert not any(c.startswith("Metadata_cqc_") for c in result.normalized.columns)
+
+
+@pytest.mark.parametrize("keep_frames", [True, False])
+@pytest.mark.parametrize("run_buscar", [True, False])
+def test_finalize_logs_stage_boundaries(
+    tmp_path: Path, capsys, monkeypatch, keep_frames: bool, run_buscar: bool
+) -> None:
+    raw = _plate_raw_profiles().drop(
+        columns=["_disease_condition", "_treatment", "_treatment_conc"]
+    )
+
+    def forbid_memory_scan(*_args: object, **_kwargs: object):
+        raise AssertionError("diagnostics must not scan frame contents")
+
+    monkeypatch.setattr(pd.DataFrame, "memory_usage", forbid_memory_scan)
+    result = finalize_plate(
+        raw,
+        _site_metadata(),
+        tmp_path,
+        "HRCE-1",
+        "25",
+        profiler="morphem",
+        keep_frames=keep_frames,
+        run_buscar=run_buscar,
+    )
+    lines = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("[rerx ")
+    ]
+    stages = [
+        "annotate",
+        "add_perturbation",
+        "qc_flag",
+        "qc_filter",
+        "normalize",
+        "feature_selection",
+        "control_separation",
+        "buscar",
+        "finish",
+    ]
+    assert [
+        (line.split("stage=")[1].split()[0], line.split("event=")[1].split()[0])
+        for line in lines
+    ] == [(stage, event) for stage in stages for event in ("start", "end")]
+    for line in lines:
+        assert "experiment=HRCE-1 plate=25 profiler=morphem" in line
+        assert "rows=30 cols=" in line
+        assert "rss_mib=" in line and "peak_rss_mib=" in line
+    assert f"cols={raw.shape[1]}" in lines[0]
+    assert f"cols={result.n_feature_selected_cols}" in lines[-1]
+    if not run_buscar:
+        assert "run_buscar=False" in lines[-3]
+
+
+def test_finalize_logs_failure_before_propagating(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    def fail_normalize(*_args: object, **_kwargs: object):
+        output = capsys.readouterr().out
+        assert "stage=normalize event=start" in output
+        raise RuntimeError("normalization failed")
+
+    monkeypatch.setattr(finalize_module, "_normalize_profiles", fail_normalize)
+    raw = _plate_raw_profiles().drop(
+        columns=["_disease_condition", "_treatment", "_treatment_conc"]
+    )
+    with pytest.raises(RuntimeError, match="normalization failed"):
+        finalize_plate(raw, _site_metadata(), tmp_path, "HRCE-1", "25")
+    output = capsys.readouterr().out
+    assert "stage=normalize event=failed" in output
+    assert "error=RuntimeError" in output
+    assert "stage=feature_selection" not in output
+
+
+@pytest.mark.parametrize("error", [ValueError("edge case"), ZeroDivisionError("zero")])
+def test_finalize_logs_handled_buscar_failure(
+    tmp_path: Path, capsys, monkeypatch, error
+) -> None:
+    def fail_buscar(*_args: object, **_kwargs: object):
+        raise error
+
+    monkeypatch.setattr(finalize_module, "run_buscar_for_plate", fail_buscar)
+    raw = _plate_raw_profiles().drop(
+        columns=["_disease_condition", "_treatment", "_treatment_conc"]
+    )
+    result = finalize_plate(raw, _site_metadata(), tmp_path, "HRCE-1", "25")
+    assert result.buscar is None
+    assert (
+        result.buscar_skipped_reason == f"buscar raised {type(error).__name__}: {error}"
+    )
+    output = capsys.readouterr().out
+    assert f"error={type(error).__name__}" in output
+    assert "stage=buscar event=failed" in output
+    assert "stage=buscar event=end" not in output
+    assert "stage=finish event=end" in output

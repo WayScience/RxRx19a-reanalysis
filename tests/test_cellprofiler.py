@@ -2,7 +2,9 @@
 Tests for the cellprofiler module.
 """
 
+import subprocess
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -263,6 +265,144 @@ def test_run_cellprofiler_shard_stages_and_records_result(
     assert len(result.mask_paths) == 1
     assert result.log_path.exists()
     assert "ran ok" in result.log_path.read_text()
+
+
+def test_run_cellprofiler_shard_preserves_previous_attempts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shard = ImageSetShard(shard_id="retry", image_sets=[])
+    task_dir = shard.task_dir(tmp_path, "run")
+    output_dir = task_dir / "output"
+    output_dir.mkdir(parents=True)
+    mask_name = "A01_s1_w1_MaskNuclei.tiff"
+    (output_dir / mask_name).write_bytes(b"old mask")
+    (output_dir / "cells.sqlite").write_bytes(b"old database")
+    old_inode = output_dir.stat().st_ino
+    log_path = task_dir / "cellprofiler.log"
+    log_path.write_text("interrupted attempt")
+
+    def fake_run(command, capture_output, text, timeout, check):
+        destination = Path(command[command.index("-o") + 1])
+        assert destination == output_dir
+        assert list(destination.iterdir()) == []
+        (destination / mask_name).write_bytes(b"new mask")
+        (destination / "cells.sqlite").write_bytes(b"new database")
+        return subprocess.CompletedProcess(command, 0, stdout="success", stderr="")
+
+    monkeypatch.setattr("rerx.cellprofiler.subprocess.run", fake_run)
+    for _ in range(2):
+        result = run_cellprofiler_shard(shard, tmp_path / "source", tmp_path, "run")
+        assert result.sqlite_path == output_dir / "cells.sqlite"
+        assert result.mask_paths == [output_dir / mask_name]
+
+    archives = sorted(
+        path for path in task_dir.glob("output.previous-*") if path.is_dir()
+    )
+    assert len(archives) == 2
+    for archive in archives:
+        UUID(archive.name.removeprefix("output.previous-"))
+    first = next(path for path in archives if path.stat().st_ino == old_inode)
+    assert (first / mask_name).read_bytes() == b"old mask"
+    assert (first / "cells.sqlite").read_bytes() == b"old database"
+    assert (
+        first.with_name(f"{first.name}.cellprofiler.log").read_text()
+        == "interrupted attempt"
+    )
+    second = next(path for path in archives if path != first)
+    assert (second / mask_name).read_bytes() == b"new mask"
+    assert (second / "cells.sqlite").read_bytes() == b"new database"
+    assert "success" in second.with_name(f"{second.name}.cellprofiler.log").read_text()
+    assert (output_dir / mask_name).read_bytes() == b"new mask"
+    assert "success" in log_path.read_text()
+
+
+@pytest.mark.parametrize("kind", ["file", "directory_symlink", "dangling_symlink"])
+def test_run_cellprofiler_shard_rejects_unsafe_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    shard = ImageSetShard(shard_id="retry", image_sets=[])
+    task_dir = shard.task_dir(tmp_path, "run")
+    task_dir.mkdir(parents=True)
+    output_dir = task_dir / "output"
+    target = tmp_path / "external"
+    if kind == "file":
+        output_dir.write_bytes(b"do not overwrite")
+    else:
+        if kind == "directory_symlink":
+            target.mkdir()
+            (target / "mask.tiff").write_bytes(b"external evidence")
+        output_dir.symlink_to(target, target_is_directory=True)
+    log_path = task_dir / "cellprofiler.log"
+    log_path.write_text("old log")
+
+    def unexpected_run(command, capture_output, text, timeout, check):
+        pytest.fail("unsafe output must be rejected before launching CellProfiler")
+
+    monkeypatch.setattr("rerx.cellprofiler.subprocess.run", unexpected_run)
+    with pytest.raises(ValueError, match=r"output.*must be a real directory"):
+        run_cellprofiler_shard(shard, tmp_path / "source", tmp_path, "run")
+    assert log_path.read_text() == "old log"
+    assert list(task_dir.glob("output.previous-*")) == []
+    if kind == "file":
+        assert output_dir.read_bytes() == b"do not overwrite"
+    else:
+        assert output_dir.is_symlink()
+        assert output_dir.readlink() == target
+        if kind == "directory_symlink":
+            assert (target / "mask.tiff").read_bytes() == b"external evidence"
+        else:
+            assert not target.exists()
+
+
+@pytest.mark.parametrize("outcome", ["failure", "timeout"])
+def test_run_cellprofiler_shard_preserves_failed_attempt_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    shard = ImageSetShard(shard_id="retry", image_sets=[])
+    task_dir = shard.task_dir(tmp_path, "run")
+    output_dir = task_dir / "output"
+    output_dir.mkdir(parents=True)
+    (output_dir / "cells.sqlite").write_bytes(b"old database")
+    (task_dir / "cellprofiler.log").write_text("old failure")
+
+    def fake_run(command, capture_output, text, timeout, check):
+        assert list(output_dir.iterdir()) == []
+        (output_dir / "partial_MaskNuclei.tiff").write_bytes(b"partial mask")
+        (output_dir / "cells.sqlite").write_bytes(b"partial database")
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(
+                command, timeout, output=b"partial stdout", stderr=b"partial stderr"
+            )
+        return subprocess.CompletedProcess(
+            command, 1, stdout="partial stdout", stderr="partial stderr"
+        )
+
+    monkeypatch.setattr("rerx.cellprofiler.subprocess.run", fake_run)
+    if outcome == "timeout":
+        with pytest.raises(subprocess.TimeoutExpired):
+            run_cellprofiler_shard(shard, tmp_path / "source", tmp_path, "run")
+    else:
+        result = run_cellprofiler_shard(shard, tmp_path / "source", tmp_path, "run")
+        assert result.returncode == 1
+    archives = [path for path in task_dir.glob("output.previous-*") if path.is_dir()]
+    assert len(archives) == 1
+    assert (archives[0] / "cells.sqlite").read_bytes() == b"old database"
+    assert (
+        archives[0].with_name(f"{archives[0].name}.cellprofiler.log").read_text()
+        == "old failure"
+    )
+    assert (output_dir / "partial_MaskNuclei.tiff").read_bytes() == b"partial mask"
+    assert (output_dir / "cells.sqlite").read_bytes() == b"partial database"
+    log = (task_dir / "cellprofiler.log").read_text()
+    assert "partial stdout" in log
+    assert "partial stderr" in log
+    if outcome == "timeout":
+        assert "timed out" in log
 
 
 def test_pipeline_hash_and_container_hash(tmp_path: Path) -> None:

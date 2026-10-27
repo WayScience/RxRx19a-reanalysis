@@ -19,9 +19,13 @@ unless the caller supplies a different ``parsl_config``.
 """
 
 import hashlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import pandas as pd
 
@@ -127,6 +131,39 @@ def local_threads_parsl_config() -> "parsl.Config":
     return config
 
 
+@contextmanager
+def atomic_parquet_output(dest_path: Path) -> Iterator[Path]:
+    """Yield a fresh path; publish only a completed, readable Parquet file.
+
+    A failed attempt leaves the existing destination untouched. Legacy
+    CytoTable work directories at that destination are preserved under a
+    unique sibling name before publication. Temporary paths are on the
+    destination filesystem so completed files can be renamed atomically.
+    """
+    import pyarrow.parquet as pq
+
+    dest_path = Path(dest_path)
+    if dest_path.is_symlink():
+        raise ValueError(f"refusing symlink Parquet destination: {dest_path}")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(
+        dir=dest_path.parent, prefix=f"{dest_path.name}.attempt-"
+    ) as attempt:
+        staged = Path(attempt) / "profiles.parquet"
+        yield staged
+        pq.ParquetFile(staged)  # Reject missing/truncated files before publication.
+        previous = None
+        if dest_path.is_dir():
+            previous = dest_path.with_name(f"{dest_path.name}.previous-{uuid4().hex}")
+            dest_path.rename(previous)
+        try:
+            staged.replace(dest_path)
+        except OSError:
+            if previous is not None:
+                previous.rename(dest_path)
+            raise
+
+
 def convert_sqlite_to_parquet(
     sqlite_path: Path,
     dest_path: Path,
@@ -154,6 +191,10 @@ def convert_sqlite_to_parquet(
         creates two files with different schemas in one glob (confirmed
         during e2e testing: DuckDB's catalog registration fails with a
         "Column ... was not found in file" error).
+        Conversion uses a fresh temporary path and publishes the result
+        only after success, so retries can replace an existing file.
+        A leftover CytoTable work directory is preserved as a uniquely
+        named ``<dest_path>.previous-*`` sibling before replacement.
     joins : str | None
         DuckDB join SQL passed to CytoTable. Defaults to ``None``, which
         inspects ``sqlite_path``'s ``Per_Image`` schema and builds the
@@ -189,16 +230,17 @@ def convert_sqlite_to_parquet(
             include_image_quality=_has_image_quality_columns(sqlite_path)
         )
     cfg = parsl_config if parsl_config is not None else local_threads_parsl_config()
-    result = convert(
-        source_path=str(sqlite_path),
-        dest_path=str(dest_path),
-        dest_datatype="parquet",
-        source_datatype=CYTOTABLE_SOURCE_DATATYPE,
-        preset=CYTOTABLE_PRESET,
-        joins=joins,
-        parsl_config=cfg,
-    )
-    return Path(result) if isinstance(result, str) else dest_path
+    with atomic_parquet_output(dest_path) as staged:
+        convert(
+            source_path=str(sqlite_path),
+            dest_path=str(staged),
+            dest_datatype="parquet",
+            source_datatype=CYTOTABLE_SOURCE_DATATYPE,
+            preset=CYTOTABLE_PRESET,
+            joins=joins,
+            parsl_config=cfg,
+        )
+    return dest_path
 
 
 def make_cell_id(row: pd.Series) -> str:

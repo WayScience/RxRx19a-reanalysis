@@ -17,11 +17,13 @@ detected and skipped, not allowed to crash the whole run.
 """
 
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import pandas as pd
 
 from rerx.buscar import BuscarConfig, PlateBuscarResult, run_buscar_for_plate
+from rerx.diagnostics import stage
 from rerx.pycytominer import add_perturbation_column, annotate_profiles
 from rerx.pycytominer import drop_flagged_outliers as _drop_flagged_outliers
 from rerx.pycytominer import flag_outliers as _flag_outliers
@@ -77,6 +79,42 @@ class PlateFinalizeResult:
     buscar: PlateBuscarResult | None
     buscar_skipped_reason: str | None
     n_cells_flagged_outlier: int = 0
+    n_cells_normalized: int = 0
+    n_cells_feature_selected: int = 0
+    n_feature_selected_cols: int = 0
+
+    def __post_init__(self) -> None:
+        # keep_frames=True callers never set the count fields, so derive
+        # them from the frames; keep_frames=False callers get the real
+        # counts (frames are empty by design) and keep them.
+        if self.n_cells_normalized == 0 and len(self.normalized) > 0:
+            object.__setattr__(self, "n_cells_normalized", len(self.normalized))
+        if self.n_cells_feature_selected == 0 and len(self.feature_selected) > 0:
+            object.__setattr__(
+                self, "n_cells_feature_selected", len(self.feature_selected)
+            )
+        if self.n_feature_selected_cols == 0 and len(self.feature_selected.columns) > 0:
+            object.__setattr__(
+                self, "n_feature_selected_cols", self.feature_selected.shape[1]
+            )
+
+
+def _buscar_skip_reason(
+    control_separation: ControlSeparationResult, run_buscar: bool
+) -> str | None:
+    """Describe the existing buscar gates without changing their decisions."""
+    if not run_buscar:
+        return "run_buscar=False"
+    if control_separation.skipped:
+        return "control separation check was skipped (missing data)"
+    if not control_separation.passed:
+        return (
+            "mock/active_untreated controls do not separate "
+            f"(median |Cohen's d| = {control_separation.median_abs_effect_size:.3f} "
+            f"< {control_separation.effect_threshold}); buscar would error on an "
+            "empty on-signature, so it was skipped for this plate"
+        )
+    return None
 
 
 def finalize_plate(  # noqa: PLR0913, PLR0917
@@ -88,6 +126,7 @@ def finalize_plate(  # noqa: PLR0913, PLR0917
     buscar_config: BuscarConfig | None = None,
     run_buscar: bool = True,
     profiler: str = "cellprofiler",
+    keep_frames: bool = True,
 ) -> PlateFinalizeResult:
     """
     Run the full per-plate finalize batch: annotate through buscar.
@@ -119,6 +158,12 @@ def finalize_plate(  # noqa: PLR0913, PLR0917
         Feature source sub-tree: ``"cellprofiler"`` or ``"morphem"``.
         Selects the output paths (and the buscar feature pool comes
         from the profiles themselves either way).
+    keep_frames : bool
+        When ``True`` (default, for tests and interactive use) the
+        result carries the annotated/normalized/feature_selected
+        frames. When ``False`` (production, full-scale plates) the
+        intermediate frames are freed as soon as their counts are
+        recorded so peak memory stays near one frame instead of six.
 
     Returns
     -------
@@ -128,22 +173,41 @@ def finalize_plate(  # noqa: PLR0913, PLR0917
     run_dir = Path(run_dir)
     part_dir = f"experiment={experiment}/plate={plate}"
 
-    annotated = annotate_profiles(raw_profiles, site_metadata)
-    annotated = add_perturbation_column(annotated)
+    plate_stage = partial(stage, experiment=experiment, plate=plate, profiler=profiler)
+    with plate_stage("annotate", shape=raw_profiles.shape) as progress:
+        annotated = annotate_profiles(raw_profiles, site_metadata)
+        progress.shape = annotated.shape
+    with plate_stage("add_perturbation", shape=annotated.shape) as progress:
+        annotated = add_perturbation_column(annotated)
+        progress.shape = annotated.shape
 
     # coSMicQC outlier flag + filter, before normalization (plan.md
     # section 18, steps 2-4): flag_outliers is a no-op when the default
     # nuclei QC thresholds don't apply (e.g. MorphEm profiles have no
     # Nuclei_AreaShape_* columns), so n_cells_flagged_outlier stays 0.
     n_before_qc = len(annotated)
-    flagged = _flag_outliers(annotated)
-    filtered = _drop_flagged_outliers(flagged)
+    with plate_stage("qc_flag", shape=annotated.shape) as progress:
+        flagged = _flag_outliers(annotated)
+        progress.shape = flagged.shape
+    with plate_stage("qc_filter", shape=flagged.shape) as progress:
+        filtered = _drop_flagged_outliers(flagged)
+        progress.shape = filtered.shape
     n_cells_flagged_outlier = n_before_qc - len(filtered)
+    if not keep_frames:
+        # A full-scale plate can need tens of GB per frame; the flag and
+        # filter outputs duplicate the annotated frame, so drop the
+        # intermediates as soon as their counts are recorded.
+        del flagged
+        annotated = pd.DataFrame()
 
     normalized_path = (
         run_dir / "profiles" / profiler / "normalized" / part_dir / "profiles.parquet"
     )
-    normalized = _normalize_profiles(filtered, normalized_path)
+    with plate_stage("normalize", shape=filtered.shape) as progress:
+        normalized = _normalize_profiles(filtered, normalized_path)
+        progress.shape = normalized.shape
+    if not keep_frames:
+        del filtered
 
     feature_selected_path = (
         run_dir
@@ -153,53 +217,59 @@ def finalize_plate(  # noqa: PLR0913, PLR0917
         / part_dir
         / "profiles.parquet"
     )
-    feature_selected = _select_features(normalized, feature_selected_path)
+    with plate_stage("feature_selection", shape=normalized.shape) as progress:
+        feature_selected = _select_features(normalized, feature_selected_path)
+        progress.shape = feature_selected.shape
 
-    control_separation = check_control_separation(normalized)
+    with plate_stage("control_separation", shape=normalized.shape):
+        control_separation = check_control_separation(normalized)
 
     buscar_result: PlateBuscarResult | None = None
     buscar_skipped_reason: str | None = None
-    if not run_buscar:
-        buscar_skipped_reason = "run_buscar=False"
-    elif control_separation.skipped:
-        buscar_skipped_reason = "control separation check was skipped (missing data)"
-    elif not control_separation.passed:
-        buscar_skipped_reason = (
-            "mock/active_untreated controls do not separate "
-            f"(median |Cohen's d| = {control_separation.median_abs_effect_size:.3f} "
-            f"< {control_separation.effect_threshold}); buscar would error on an "
-            "empty on-signature, so it was skipped for this plate"
-        )
-    else:
-        buscar_dest = run_dir / "buscar" / profiler / part_dir
-        try:
-            buscar_result = run_buscar_for_plate(
-                normalized,
-                buscar_dest,
-                experiment=experiment,
-                plate=plate,
-                profiler=profiler,
-                config=buscar_config,
-            )
-        except (ValueError, ZeroDivisionError) as exc:
-            # Belt-and-suspenders: the control-separation gate should
-            # already have caught the "no on-signature" case, but buscar
-            # can still fail for other edge cases -- e.g. an empty
-            # off-signature dividing by zero under "affected_ratio", or a
-            # perturbation with too few replicate wells; never let that
-            # crash the whole finalize run.
-            buscar_skipped_reason = f"buscar raised {exc.__class__.__name__}: {exc}"
+    try:
+        with plate_stage("buscar", shape=normalized.shape) as progress:
+            buscar_skipped_reason = _buscar_skip_reason(control_separation, run_buscar)
+            if buscar_skipped_reason is None:
+                buscar_dest = run_dir / "buscar" / profiler / part_dir
+                buscar_result = run_buscar_for_plate(
+                    normalized,
+                    buscar_dest,
+                    experiment=experiment,
+                    plate=plate,
+                    profiler=profiler,
+                    config=buscar_config,
+                )
+            if buscar_skipped_reason is not None:
+                progress.outcome = f"skipped: {buscar_skipped_reason}"
+    except (ValueError, ZeroDivisionError) as exc:
+        # Preserve the existing biological edge-case fallback, after the
+        # stage context logs the failure (including for handled exceptions).
+        buscar_skipped_reason = f"buscar raised {exc.__class__.__name__}: {exc}"
 
-    return PlateFinalizeResult(
-        experiment=experiment,
-        plate=plate,
-        annotated=annotated,
-        normalized=normalized,
-        normalized_path=normalized_path,
-        feature_selected=feature_selected,
-        feature_selected_path=feature_selected_path,
-        control_separation=control_separation,
-        buscar=buscar_result,
-        buscar_skipped_reason=buscar_skipped_reason,
-        n_cells_flagged_outlier=n_cells_flagged_outlier,
-    )
+    with plate_stage("finish", shape=feature_selected.shape):
+        n_cells_normalized, (n_cells_feature_selected, n_feature_selected_cols) = (
+            len(normalized),
+            feature_selected.shape,
+        )
+        if not keep_frames:
+            # buscar and the QC gate are the last in-memory consumers of
+            # the normalized frame; capture counts before freeing frames.
+            normalized = pd.DataFrame()
+            feature_selected = pd.DataFrame()
+
+        return PlateFinalizeResult(
+            experiment=experiment,
+            plate=plate,
+            annotated=annotated,
+            normalized=normalized,
+            normalized_path=normalized_path,
+            feature_selected=feature_selected,
+            feature_selected_path=feature_selected_path,
+            control_separation=control_separation,
+            buscar=buscar_result,
+            buscar_skipped_reason=buscar_skipped_reason,
+            n_cells_flagged_outlier=n_cells_flagged_outlier,
+            n_cells_normalized=n_cells_normalized,
+            n_cells_feature_selected=n_cells_feature_selected,
+            n_feature_selected_cols=n_feature_selected_cols,
+        )

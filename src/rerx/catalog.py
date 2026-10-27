@@ -179,11 +179,11 @@ def build_run_catalog(
             file_list = ", ".join(f"'{f}'" for f in files)
             con.execute(
                 f"CREATE TABLE {table} AS "
-                f"SELECT * FROM read_parquet([{file_list}]) LIMIT 0"
+                f"SELECT * FROM read_parquet([{file_list}], union_by_name=true) LIMIT 0"
             )
             for f in files:
                 con.execute(
-                    "CALL ducklake_add_data_files(?, ?, ?)",
+                    "CALL ducklake_add_data_files(?, ?, ?, allow_missing => true)",
                     ["rerx_catalog", table, str(f)],
                 )
             row_count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()

@@ -123,6 +123,42 @@ def test_build_run_catalog_missing_run_root_raises(tmp_path: Path) -> None:
         )
 
 
+def test_build_run_catalog_preserves_columns_that_differ_by_plate(
+    tmp_path: Path,
+) -> None:
+    run_root = tmp_path / "run"
+    first = run_root / "profiles" / "experiment=HRCE-1" / "plate=1"
+    second = run_root / "profiles" / "experiment=HRCE-1" / "plate=2"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    pd.DataFrame({"Metadata_cell_id": ["a"], "Cells_x": [1.0]}).to_parquet(
+        first / "profiles.parquet", index=False
+    )
+    pd.DataFrame({"Metadata_cell_id": ["b"], "Cells_y": [2.0]}).to_parquet(
+        second / "profiles.parquet", index=False
+    )
+    catalog_path, data_path = tmp_path / "catalog.ducklake", tmp_path / "data"
+    build_run_catalog(
+        run_root,
+        catalog_path,
+        data_path,
+        tables={"profiles": "profiles/**/*.parquet"},
+    )
+    import duckdb
+
+    con = duckdb.connect()
+    con.execute("INSTALL ducklake")
+    con.execute("LOAD ducklake")
+    con.execute(f"ATTACH 'ducklake:{catalog_path}' AS cat (DATA_PATH '{data_path}')")
+    try:
+        assert con.execute(
+            "SELECT Metadata_cell_id, Cells_x, Cells_y FROM cat.profiles "
+            "ORDER BY Metadata_cell_id"
+        ).fetchall() == [("a", 1.0, None), ("b", None, 2.0)]
+    finally:
+        con.close()
+
+
 def test_build_run_catalog_custom_tables(tmp_path: Path) -> None:
     run_root = tmp_path / "run"
     _make_run_with_profiles(run_root)

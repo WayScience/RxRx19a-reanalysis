@@ -1,0 +1,6 @@
+{
+  "title": "Example ticket: check that the Canopy loop runs",
+  "labels": ["example"],
+  "effort": "xs",
+  "body": "This is a demo ticket for the Canopy workflow harness. A responder should triage it and the run should reach the needs_review terminal."
+}

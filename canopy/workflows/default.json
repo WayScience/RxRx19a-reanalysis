@@ -1,0 +1,54 @@
+{
+  "workflow_version": "1.0",
+  "start": "triage",
+  "nodes": [
+    {
+      "id": "triage",
+      "type": "llm",
+      "skill": "triage",
+      "max_retries": 1
+    },
+    {
+      "id": "review",
+      "type": "llm",
+      "skill": "review",
+      "max_retries": 0
+    },
+    {
+      "id": "review-gate",
+      "type": "flow",
+      "kind": "gate",
+      "predicate": {
+        "kind": "output",
+        "node": "review",
+        "field": "verdict",
+        "equals": "pass"
+      }
+    },
+    {
+      "id": "checks",
+      "type": "infra",
+      "command": ["uv", "run", "--frozen", "pytest", "-q", "--no-cov"]
+    },
+    {
+      "id": "gate",
+      "type": "flow",
+      "kind": "gate",
+      "predicate": { "kind": "checks", "status": "passed" }
+    },
+    {
+      "id": "done",
+      "type": "term",
+      "action": "needs_review"
+    }
+  ],
+  "edges": [
+    { "from": "triage", "to": "review" },
+    { "from": "review", "to": "review-gate" },
+    { "from": "review-gate", "to": "checks" },
+    { "from": "checks", "to": "gate" },
+    { "from": "gate", "to": "done" },
+    { "from": "gate", "to": "triage", "kind": "loop" },
+    { "from": "review-gate", "to": "triage", "kind": "loop" }
+  ]
+}
