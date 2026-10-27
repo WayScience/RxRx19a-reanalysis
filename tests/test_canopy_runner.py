@@ -11,7 +11,7 @@ import pytest
 
 from canopy.model import load_workflow
 from canopy.responders import CommandResponder
-from canopy.runner import AgenticRunner, RunResult, extract_json
+from canopy.runner import AgenticRunner, RunResult, _RunState, extract_json
 
 
 def _skills_dir(tmp_path: Path) -> Path:
@@ -623,6 +623,82 @@ def test_prompt_carries_prior_stage_outputs_and_check_failures(tmp_path: Path) -
     assert "# Check results this round" in prompts[2]
     assert "exit 1" in prompts[2]
     assert "# Prior stage outputs" in prompts[2]
+
+
+def test_prompt_puts_decisive_evidence_at_the_end(tmp_path: Path) -> None:
+    # attention budget is not uniform across a prompt: the decisive
+    # evidence (check failures, changed paths, latest attempt) belongs
+    # at the end, stable context (ticket, prior outputs) earlier
+    document = {
+        "workflow_version": "1.0",
+        "start": "triage",
+        "nodes": [
+            {"id": "triage", "type": "llm", "skill": "plan", "max_retries": 1},
+            {"id": "review", "type": "llm", "skill": "review", "max_retries": 0},
+            {"id": "checks", "type": "infra", "command": ["false"]},
+            {
+                "id": "gate",
+                "type": "flow",
+                "kind": "gate",
+                "predicate": {"kind": "checks", "status": "passed"},
+            },
+            {"id": "done", "type": "term", "action": "needs_review"},
+        ],
+        "edges": [
+            {"from": "triage", "to": "review"},
+            {"from": "review", "to": "checks"},
+            {"from": "checks", "to": "gate"},
+            {"from": "gate", "to": "done"},
+            {"from": "gate", "to": "triage", "kind": "loop"},
+        ],
+    }
+    path = tmp_path / "wf.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    prompts: list[str] = []
+
+    def ask(prompt: str) -> str:
+        prompts.append(prompt)
+        if "# Review" in prompt:
+            return json.dumps({"verdict": "fail", "findings": [], "changed_paths": []})
+        return _valid_output()
+
+    runner = AgenticRunner(
+        workflow=load_workflow(path),
+        skills_dir=_skills_dir(tmp_path),
+        ask=ask,
+        workdir=tmp_path,
+        journal_path=tmp_path / "j.jsonl",
+    )
+    result = runner.run(ticket={"title": "t"})
+    assert result.outcome == "failed"
+    fix_prompt = prompts[2]
+    # order: ... prior outputs ... working dir, then the tail holds
+    # changed paths, check results, and the latest attempt context
+    assert fix_prompt.index("# Prior stage outputs") < fix_prompt.index(
+        "# Check results this round"
+    )
+    assert fix_prompt.index("# Working directory") < fix_prompt.index("# Changed paths")
+    assert fix_prompt.index("# Changed paths") < fix_prompt.index(
+        "# Check results this round"
+    )
+    assert fix_prompt.index("# Check results this round") < len(fix_prompt)
+
+
+def test_prompt_writes_history_sidecar_for_oversized_attempts(
+    tmp_path: Path,
+) -> None:
+    # when the previous-attempt context is huge, the prompt keeps a
+    # short tail and points at a sidecar file holding the full text
+    big = "x" * 100_000
+    runner = _runner(tmp_path, lambda prompt: _valid_output(), max_retries=1)
+    node = runner.workflow.nodes["plan"]
+    state = _RunState(ticket={"title": "t"})
+    prompt = runner._prompt(node, state, extra=big)
+    assert len(prompt) < 20_000
+    assert "history file" in prompt.lower()
+    sidecar = tmp_path / "plan.attempt-history.txt"
+    assert sidecar.exists()
+    assert big in sidecar.read_text(encoding="utf-8")
 
 
 def test_command_responder_pipes_prompt_and_captures_stdout(tmp_path: Path) -> None:

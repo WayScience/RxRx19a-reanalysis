@@ -7,6 +7,15 @@ leaves open. Style you would have written differently is not a finding.
 
 ## How to review
 
+Your prompt carries, in order: this procedure, the output contract,
+the ticket, the validated outputs of every stage that ran before you
+(the triage summary, any implement-stage change summary — whatever
+earlier stages produced, whatever wrote them), the working directory,
+the paths the run claims to have changed, and this round's check
+results. Review from all of it: the change summary describes intent;
+the check results and your own reading of the code describe reality.
+A summary is evidence of what was attempted, never proof it worked.
+
 1. Read the ticket and the change summary.
 1. Start with the paths the change claims to touch. If reading them
    shows the change depends on a problem in closely connected code —

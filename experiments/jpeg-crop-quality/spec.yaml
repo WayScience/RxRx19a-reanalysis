@@ -20,10 +20,14 @@ decisions:
     options:
       jpeg_q95:
         label: JPEG quality 95
-        description: Crops stored as JPEG bytes in Parquet, as the pipeline stores them
+        description: >
+          Crops stored as JPEG bytes in Parquet, as the pipeline
+          stores them
       lossless:
         label: Lossless in-memory
-        description: Crops re-rendered from source PNGs via crop_site_cells, never JPEG-compressed
+        description: >
+          Crops re-rendered from source PNGs via crop_site_cells,
+          never JPEG-compressed
 
 outputs:
   - id: embedding_distance

@@ -29,6 +29,11 @@ Responder = Callable[[str], str]
 
 MAX_WALK_STEPS = 1000
 
+# Attempt history longer than this spills to a sidecar file instead of
+# diluting the prompt's middle (attention is not uniform across a long
+# prompt; the middle is where context is most easily lost).
+ATTEMPT_HISTORY_INLINE_LIMIT = 10_000
+
 
 def _skill_name(node: Node) -> str:
     """
@@ -194,6 +199,13 @@ class AgenticRunner:
 
     def _prompt(self, node: Node, state: _RunState, extra: str = "") -> str:
         skill = load_skill(Path(self.skills_dir) / _skill_name(node))
+        # Prompt order follows attention, not chronology: models attend
+        # most reliably to the start and the end of a long prompt. The
+        # stable context (procedure, contract, ticket, prior outputs)
+        # leads; the decisive evidence (changed paths, this round's
+        # check results, the latest attempt) closes. Oversized attempt
+        # history spills to a sidecar file the responder can read on
+        # demand instead of diluting the middle.
         prompt = f"{skill.body}"
         if skill.contract is not None:
             prompt += (
@@ -204,17 +216,26 @@ class AgenticRunner:
         if state.outputs:
             evidence = json.dumps(state.outputs, indent=2)
             prompt += f"\n\n# Prior stage outputs\n\n{evidence}"
-        if state.check_output:
-            prompt += "\n\n# Check results this round\n\n" + json.dumps(
-                state.check_output, indent=2
-            )
+        prompt += f"\n\n# Working directory\n\n{Path(self.workdir).resolve()}"
         if state.changed_paths:
             prompt += "\n\n# Changed paths\n\n" + "\n".join(
                 f"- {path}" for path in state.changed_paths
             )
-        prompt += f"\n\n# Working directory\n\n{Path(self.workdir).resolve()}"
+        if state.check_output:
+            prompt += "\n\n# Check results this round\n\n" + json.dumps(
+                state.check_output, indent=2
+            )
         if extra:
-            prompt += f"\n\n# Previous attempt\n\n{extra}"
+            if len(extra) > ATTEMPT_HISTORY_INLINE_LIMIT:
+                sidecar = Path(self.workdir) / f"{node.id}.attempt-history.txt"
+                sidecar.write_text(extra, encoding="utf-8")
+                prompt += (
+                    "\n\n# Previous attempt\n\nThe full attempt history is "
+                    f"long; it is written to the history file "
+                    f"{sidecar}. Read it if you need it."
+                )
+            else:
+                prompt += f"\n\n# Previous attempt\n\n{extra}"
         return prompt
 
     def _run_llm(self, node: Node, state: _RunState) -> dict | None:

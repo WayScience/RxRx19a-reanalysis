@@ -17,7 +17,6 @@ written down next to the choice, not in a commit message or a chat.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 SPEC_VERSIONS = ("1.0",)
 
@@ -30,7 +29,7 @@ KNOWN_OUTPUT_FIELDS = {"id", "type", "decisions", "description", "recipe"}
 KNOWN_UNIVERSE_FIELDS = {"description", "decisions"}
 
 
-def _validate_decision(name: str, decision: Any) -> list[str]:
+def _validate_decision(name: str, decision: object) -> list[str]:
     errors: list[str] = []
     where = f"decision {name!r}"
     if not isinstance(decision, dict):
@@ -61,14 +60,13 @@ def _validate_decision(name: str, decision: Any) -> list[str]:
     default = decision.get("default")
     if default is not None and default not in options:
         errors.append(
-            f"{where}: default {default!r} is not one of the options "
-            f"{sorted(options)}"
+            f"{where}: default {default!r} is not one of the options {sorted(options)}"
         )
     return errors
 
 
-def _validate_outputs(
-    outputs: Any, decision_names: set[str]
+def _validate_outputs(  # noqa: C901
+    outputs: object, decision_names: set[str]
 ) -> list[str]:
     errors: list[str] = []
     if not isinstance(outputs, list):
@@ -108,15 +106,11 @@ def _validate_outputs(
         else:
             for decision_name in shaped_by:
                 if decision_name not in decision_names:
-                    errors.append(
-                        f"{where}: names unknown decision {decision_name!r}"
-                    )
+                    errors.append(f"{where}: names unknown decision {decision_name!r}")
     return errors
 
 
-def _validate_universes(
-    universes: Any, decisions: dict[str, dict]
-) -> list[str]:
+def _validate_universes(universes: object, decisions: dict[str, dict]) -> list[str]:
     errors: list[str] = []
     if not isinstance(universes, dict) or not universes:
         return ["universes: must be a non-empty mapping of universe name to picks"]
@@ -137,9 +131,7 @@ def _validate_universes(
             continue
         for decision_name, picked in picks.items():
             if decision_name not in decisions:
-                errors.append(
-                    f"{where}: picks unknown decision {decision_name!r}"
-                )
+                errors.append(f"{where}: picks unknown decision {decision_name!r}")
                 continue
             options = decisions[decision_name].get("options", {})
             if isinstance(options, dict) and picked not in options:
@@ -150,7 +142,7 @@ def _validate_universes(
     return errors
 
 
-def validate_spec(spec: Any) -> list[str]:
+def validate_spec(spec: object) -> list[str]:
     """
     Validate an experiment spec and list every problem.
 
@@ -194,7 +186,7 @@ def validate_spec(spec: Any) -> list[str]:
     return errors
 
 
-def load_spec(path) -> dict:
+def load_spec(path: Path) -> dict:
     """
     Read and validate a YAML experiment spec.
 

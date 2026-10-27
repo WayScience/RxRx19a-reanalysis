@@ -13,7 +13,7 @@ def _spec() -> dict:
         "decisions": {
             "crop_encoding": {
                 "label": "Crop encoding",
-                "rationale": "JPEG 95 saves space; lossless avoids compression artifacts.",
+                "rationale": "JPEG 95 saves space; lossless avoids artifacts.",
                 "default": "jpeg_q95",
                 "options": {
                     "jpeg_q95": {"label": "JPEG quality 95"},
