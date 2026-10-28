@@ -33,6 +33,37 @@ Technical completion does not mean every plate passed biological QC or received 
 Keep these results in place: the catalog refers to their existing paths.
 Update this section only after a newer full run has a verified `_SUCCESS` marker and matching plate, shard, and row counts.
 
+### Reports and current findings
+
+The [report index](reports/README.md) describes the existing HTML reports.
+Open the HTML files locally in a browser.
+These reports describe pilot runs and method checks, **not the latest full production run**:
+
+| Report                                                  | Scope                                                  |
+| ------------------------------------------------------- | ------------------------------------------------------ |
+| [Phenotypic overview](reports/phenotypic_overview.html) | Pilot CellProfiler, MorphEm, and Recursion comparisons |
+| [Buscar reversal](reports/buscar_reversal.html)         | Pilot treatment scores calculated at the well level    |
+| [Pipeline health](reports/pipeline_run.html)            | Processing and QC for `pilot-x8`                       |
+| [Segmentation check](reports/segmentation_check.html)   | Sampled-image segmentation comparison                  |
+| [Method decisions](reports/decisions.html)              | Pipeline choices and checks that remain open           |
+
+For the latest production run, use these files under the results directory above:
+
+- `run_summary.json` — combined processing and biological QC outcomes, with one entry per plate and profiler.
+- `qc/plates/<plate_id>.json` — detailed outcomes and skip reasons for each of the 57 plates.
+- `diagnostics/completion-verified-20261028T040528Z.json` — independently verified completion and dataset counts.
+
+The production counts and data contents are summarized in this README.
+A full-production HTML report has not been added to `reports/`.
+In particular, `pipeline_run.html` still describes `pilot-x8`.
+
+Technical processing succeeded, but this run has **no buscar scores or signatures**.
+The biological control-separation check failed for all 57 plates with both profilers, so `run_summary.json` records 114 skips.
+Those skips are documented outcomes, not missing processing jobs.
+They do not establish that treatments are ineffective or provide a production-wide treatment ranking.
+The pilot buscar report uses well-level aggregation, and its scores must not be presented as results from this full run.
+Recursion baseline comparisons and the pilot crop-review notebook are also absent from this full run.
+
 ### What the current dataset contains
 
 The source is RxRx19a five-channel microscopy, with site and treatment annotations from Recursion's metadata archive.
@@ -101,11 +132,6 @@ rxrx19a-full-20261015T223716Z-g83c9641/
 
 Original source PNGs, segmentation masks, and CellProfiler SQLite working files are not part of this published results tree.
 The cell crops and measurement tables are the durable image-derived results here.
-
-This run has **no buscar scores or signatures**.
-The biological control-separation check failed for all 57 plates with both profilers, so `run_summary.json` records 114 skips.
-Those skips are documented outcomes, not missing processing jobs.
-Recursion baseline comparisons and the pilot crop-review notebook are also absent from this full run.
 
 ### Browse the data with DuckDB
 
