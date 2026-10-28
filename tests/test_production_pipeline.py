@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -495,6 +496,23 @@ def test_full_plate_finalization_runs_real_analysis_on_small_fixture(
     )
     assert {p["profiler"] for p in summary["plates"]} == {"cellprofiler", "morphem"}
     assert summary["fusion"]["rows"] == cells
+    with monkeypatch.context() as patcher:
+        patcher.setattr(
+            "rerx.catalog.build_run_catalog",
+            Mock(side_effect=OSError("catalog write failed")),
+        )
+        with pytest.raises(OSError, match="catalog write failed"):
+            tasks.cmd_complete_full()
+    assert not (tasks.RUN_DIR / "_SUCCESS").exists()
+    pd.testing.assert_frame_equal(
+        pd.read_parquet(
+            tasks.RUN_DIR
+            / "profiles/fused/feature_selected"
+            / "experiment=HRCE-1/plate=25/profiles.parquet"
+        ),
+        fused,
+    )
+    # Retry only completion, reusing the already finalized plate.
     tasks.cmd_complete_full()
     assert (tasks.RUN_DIR / "catalog" / "run.ducklake").is_file()
     assert (tasks.RUN_DIR / "_SUCCESS").is_file()

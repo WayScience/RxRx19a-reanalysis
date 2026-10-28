@@ -2,10 +2,11 @@
 Frozen DuckLake catalog builder for completed ReRx runs.
 
 Implements plan.md section 20 ("Stage 11: Frozen DuckLake catalog"): after
-a run reaches ``_SUCCESS``, build a read-only DuckLake catalog over its
+validation, build a read-only DuckLake catalog over the run's
 Parquet files using ``ducklake_add_data_files()`` (see
 https://ducklake.select/2025/10/24/frozen-ducklake/), so the files
 themselves stay canonical and the catalog is disposable/rebuildable.
+The publishing command writes ``_SUCCESS`` only after this build succeeds.
 
 Verified locally: ``ducklake_add_data_files`` requires the target table to
 already exist with a schema derived from the file before registering it
@@ -125,9 +126,8 @@ def build_run_catalog(  # noqa: PLR0913 - retain positional API plus resource kn
     Parameters
     ----------
     run_root : Path
-        Completed run directory (should carry ``_SUCCESS``; plan.md
-        section 21: "Build the PetaLibrary DuckLake catalog" happens at
-        run completion, after publishing validated shards).
+        Run directory containing validated Parquet files. The publishing
+        command writes ``_SUCCESS`` after the catalog build succeeds.
     catalog_path : Path
         Destination ``.ducklake`` metadata file. Deleted and rebuilt if it
         already exists (catalogs are disposable per plan.md section 20).
@@ -198,11 +198,18 @@ def build_run_catalog(  # noqa: PLR0913 - retain positional API plus resource kn
             # Retain only the accumulated union and one footer schema, never
             # an all-file DuckDB relation or a list of every file's metadata.
             schema = pq.read_schema(files[0]).remove_metadata()
-            for file in files[1:]:
+            for scanned, file in enumerate(files[1:], start=2):
                 schema = pa.unify_schemas(
                     [schema, pq.read_schema(file).remove_metadata()],
                     promote_options="permissive",
                 )
+                if scanned % 100 == 0 or scanned == len(files):
+                    log_stage(
+                        "stage=catalog event=schema_progress",
+                        table=table,
+                        scanned=scanned,
+                        files=len(files),
+                    )
             # An empty Arrow table carries types only; no profile cells are
             # read or copied. Release its registration immediately after DDL.
             con.register(

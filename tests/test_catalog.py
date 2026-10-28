@@ -327,6 +327,11 @@ def test_catalog_logs_bounded_registration_progress(
     assert len(progress) == 2
     assert "registered=100" in progress[0]
     assert "registered=101" in progress[1]
+    schema_progress = [line for line in lines if "event=schema_progress" in line]
+    assert len(schema_progress) == 2
+    assert "table=profiles" in schema_progress[0]
+    assert "scanned=100 files=101" in schema_progress[0]
+    assert "scanned=101 files=101" in schema_progress[1]
     assert all("rss_mib=" in line and "peak_rss_mib=" in line for line in lines)
 
 
