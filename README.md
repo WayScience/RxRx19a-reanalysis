@@ -115,10 +115,11 @@ The catalog is not a second copy of the profiles or images.
 The following examples use the project's Python environment on Alpine, where the PetaLibrary paths are accessible.
 They were verified against this catalog with DuckDB 1.5.6.
 
+Use the same `RERX_ROOT` scratch root that you configured for the launcher.
 Start Python from the Alpine checkout:
 
 ```bash
-cd "/scratch/alpine/$USER/rerx/ReRx"
+cd "${RERX_ROOT:?Set RERX_ROOT to your Alpine scratch root}/ReRx"
 .venv/bin/python
 ```
 
