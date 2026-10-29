@@ -7,7 +7,9 @@ directory layout, status markers, run.json contents, and run listing.
 
 import datetime
 import json
+import os
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -269,7 +271,19 @@ class Run:
         payload["run_id"] = self.run_id
         path = self.run_json_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        # Serialize fully in memory, then replace atomically so a crash
+        # mid-write can never leave a truncated run.json for readers.
+        content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        fd, tmp_name = tempfile.mkstemp(
+            dir=path.parent, prefix=".run.json.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as tmp:
+                tmp.write(content)
+            os.replace(tmp_name, path)
+        except BaseException:
+            os.unlink(tmp_name)
+            raise
         return path
 
     def read_run_json(self) -> dict:

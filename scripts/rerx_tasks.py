@@ -1029,6 +1029,48 @@ def _accumulate_fusion(fusion: dict | None, plate_fusion: dict) -> dict:
     return fusion
 
 
+def _tool_versions_and_hashes() -> dict:
+    """Plan-required tool versions and hashes for run.json (plan.md section 25).
+
+    CellProfiler's own version comes from the pinned container at run
+    time (``cellprofiler --version``); the CellProfiler wheel is not
+    installed in this environment, so fall back to the pinned container
+    tag recorded in src/rerx/cellprofiler.py.
+    """
+    import importlib.metadata
+
+    from rerx.cellprofiler import (
+        CELLPROFILER_CONTAINER_IMAGE,
+        container_hash,
+    )
+    from rerx.morphem import MORPHEM_MODEL_REVISION
+
+    def dist_version(name: str) -> str | None:
+        try:
+            return importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            return None
+
+    def hash_if_exists(path: Path) -> str | None:
+        try:
+            return container_hash(path)
+        except FileNotFoundError:
+            return None
+
+    return {
+        "cellprofiler_version": None,  # filled from the container at run time
+        "cellprofiler_pipeline_hash": hash_if_exists(
+            REPO / "pipelines" / "rxrx19a.cppipe"
+        ),
+        "cellprofiler_container_hash": hash_if_exists(SIF),
+        "morphem_model_revision": MORPHEM_MODEL_REVISION,
+        "morphem_container_hash": hash_if_exists(MORPHEM_SIF),
+        "pycytominer_version": dist_version("pycytominer"),
+        "buscar_version": dist_version("buscar"),
+        "cellprofiler_container_image": CELLPROFILER_CONTAINER_IMAGE,
+    }
+
+
 def _write_run_json(catalog_result: "CatalogBuildResult") -> dict:
     """Write run.json with the catalog's final row counts (plan.md section 25).
 
@@ -1054,17 +1096,21 @@ def _write_run_json(catalog_result: "CatalogBuildResult") -> dict:
         "morphem_profile_count": row_counts.get("morphem_raw"),
         "catalog_row_counts": row_counts,
         "catalog_skipped_tables": catalog_result.skipped_tables,
+        **_tool_versions_and_hashes(),
     }
     Run(run_id=RUN_ID, root=RUN_DIR).write_run_json(payload)
     return payload
 
 
 def _finalize_run_json() -> None:
-    """Rewrite run.json with ``status: success`` after ``_SUCCESS`` exists."""
+    """Rewrite run.json with ``status: success`` after ``_SUCCESS`` exists.
+
+    Marker-independent: called immediately after the marker write, so the
+    marker is present, but no guard depends on re-reading it (a crashed
+    retry between marker clear and rewrite already reset the status).
+    """
     from rerx.runs import Run
 
-    if not (RUN_DIR / "_SUCCESS").exists():
-        raise FileNotFoundError("_SUCCESS marker missing; run is not complete")
     run = Run(run_id=RUN_ID, root=RUN_DIR)
     data = run.read_run_json()
     data["status"] = "success"
@@ -1130,6 +1176,12 @@ def cmd_complete_full() -> None:
         RUN_DIR / "run_summary.json",
     )
     log_stage("complete_full stage=write_summaries_done")
+    # Clear the success marker BEFORE rebuilding: build_run_catalog removes
+    # the existing catalog first, so a failed rebuild retry must not leave
+    # a stale _SUCCESS beside a deleted/partial catalog.
+    if (RUN_DIR / "_SUCCESS").exists():
+        (RUN_DIR / "_SUCCESS").unlink()
+        log_stage("complete_full stage=stale_marker_cleared")
     log_stage("complete_full stage=catalog_start")
     catalog_result = build_run_catalog(
         run_root=RUN_DIR,
@@ -1161,6 +1213,11 @@ def cmd_publish() -> None:
     for profiler in ("cellprofiler", "morphem"):
         if not list((RUN_DIR / "projection" / profiler).glob("**/scores.parquet")):
             raise FileNotFoundError(f"missing {profiler} projection scores")
+    # Clear the success marker BEFORE rebuilding: build_run_catalog removes
+    # the existing catalog first, so a failed rebuild retry must not leave
+    # a stale _SUCCESS beside a deleted/partial catalog.
+    if (RUN_DIR / "_SUCCESS").exists():
+        (RUN_DIR / "_SUCCESS").unlink()
     catalog_result = build_run_catalog(
         run_root=RUN_DIR,
         catalog_path=RUN_DIR / "catalog" / "run.ducklake",
