@@ -259,6 +259,7 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     from rerx import catalog
+    from rerx.catalog import CatalogBuildResult, CatalogTableResult
     from rerx.run_summary import PlateSummary
 
     tasks = _load_tasks(monkeypatch, tmp_path)
@@ -320,11 +321,20 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
     assert positions == sorted(positions)
     assert "rows=1 columns=" in output
     assert not (tasks.RUN_DIR / "_SUCCESS").exists()
+    assert not (tasks.RUN_DIR / "run.json").exists()
     assert (tasks.RUN_DIR / "qc" / "plates" / f"{plate_id}.json").is_file()
 
     def fake_catalog(*, run_root, catalog_path, data_path):
         catalog_path.parent.mkdir(parents=True, exist_ok=True)
         catalog_path.write_text("test catalog")
+        return CatalogBuildResult(
+            catalog_path=catalog_path,
+            data_path=data_path,
+            tables=[
+                CatalogTableResult(table="crops", files=[catalog_path], row_count=1)
+            ],
+            skipped_tables=[],
+        )
 
     monkeypatch.setattr(catalog, "build_run_catalog", fake_catalog)
     tasks.cmd_complete_full()
@@ -339,6 +349,7 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
         "write_summaries_done",
         "catalog_start",
         "catalog_done",
+        "run_json_written",
         "success_marker_written",
     ]
     positions = [
@@ -349,6 +360,9 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
     assert (tasks.RUN_DIR / "_SUCCESS").read_text() == tasks.RUN_ID + "\n"
     summary = json.loads((tasks.RUN_DIR / "run_summary.json").read_text())
     assert summary["totals"]["plates_finalized"] == 2
+    run_json = json.loads((tasks.RUN_DIR / "run.json").read_text())
+    assert run_json["status"] == "success"
+    assert run_json["catalog_row_counts"] == {"crops": 1}
 
 
 def test_complete_full_rejects_missing_artifacts_and_unplanned_shards(
@@ -503,7 +517,10 @@ def test_full_plate_finalization_runs_real_analysis_on_small_fixture(
         )
         with pytest.raises(OSError, match="catalog write failed"):
             tasks.cmd_complete_full()
-    assert not (tasks.RUN_DIR / "_SUCCESS").exists()
+    assert (
+        not (tasks.RUN_DIR / "_SUCCESS").exists()
+        and not (tasks.RUN_DIR / "run.json").exists()
+    )
     pd.testing.assert_frame_equal(
         pd.read_parquet(
             tasks.RUN_DIR
@@ -514,8 +531,10 @@ def test_full_plate_finalization_runs_real_analysis_on_small_fixture(
     )
     # Retry only completion, reusing the already finalized plate.
     tasks.cmd_complete_full()
-    assert (tasks.RUN_DIR / "catalog" / "run.ducklake").is_file()
-    assert (tasks.RUN_DIR / "_SUCCESS").is_file()
+    assert json.loads((tasks.RUN_DIR / "run.json").read_text())["status"] == "success"
+    assert (tasks.RUN_DIR / "_SUCCESS").is_file() and (
+        tasks.RUN_DIR / "catalog" / "run.ducklake"
+    ).is_file()
 
 
 def test_full_completion_waits_for_every_plate(
@@ -538,6 +557,51 @@ def test_publish_requires_completed_upstream_stages(
     with pytest.raises(FileNotFoundError, match="run_summary"):
         tasks.cmd_publish()
     assert not (tasks.RUN_DIR / "_SUCCESS").exists()
+
+
+def test_publish_writes_run_json_with_counts_before_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Publish must record catalog counts in run.json before _SUCCESS."""
+    from rerx import catalog
+    from rerx.catalog import CatalogBuildResult, CatalogTableResult
+
+    tasks = _load_tasks(monkeypatch, tmp_path)
+    tasks.RUN_DIR.mkdir(parents=True)
+    (tasks.RUN_DIR / "run_summary.json").write_text("{}")
+    baseline = (
+        tasks.RUN_DIR
+        / "baseline"
+        / "recursion_site_embeddings"
+        / "recursion_site_embeddings.parquet"
+    )
+    baseline.parent.mkdir(parents=True)
+    baseline.write_bytes(b"embeddings")
+    for profiler in ("cellprofiler", "morphem"):
+        scores = tasks.RUN_DIR / "projection" / profiler / "p" / "scores.parquet"
+        scores.parent.mkdir(parents=True)
+        scores.write_bytes(b"scores")
+
+    def fake_catalog(*, run_root, catalog_path, data_path):
+        catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        catalog_path.write_text("test catalog")
+        return CatalogBuildResult(
+            catalog_path=catalog_path,
+            data_path=data_path,
+            tables=[
+                CatalogTableResult(
+                    table="recursion_site_embeddings", files=[catalog_path], row_count=3
+                )
+            ],
+            skipped_tables=[],
+        )
+
+    monkeypatch.setattr(catalog, "build_run_catalog", fake_catalog)
+    tasks.cmd_publish()
+    run_json = json.loads((tasks.RUN_DIR / "run.json").read_text())
+    assert run_json["status"] == "success"
+    assert run_json["catalog_row_counts"] == {"recursion_site_embeddings": 3}
+    assert (tasks.RUN_DIR / "_SUCCESS").is_file()
 
 
 def test_planned_shards_require_all_four_artifacts(

@@ -360,6 +360,7 @@ export PATH="/curc/sw/install/bio/nextflow/25.10.2_env/bin:$PATH"
 export RERX_ROOT=<scratch-root>
 export RERX_PETA_ROOT=<active-petalibrary-root>
 export SLURM_ACCOUNT=<allocation>
+cd "$RERX_ROOT/ReRx"
 uv run poe run_full
 ```
 

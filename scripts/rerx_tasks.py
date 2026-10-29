@@ -47,6 +47,7 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
+    from rerx.catalog import CatalogBuildResult
     from rerx.run_summary import PlateSummary
 
 RUN_DIR = Path(os.environ["RERX_RUN_DIR"])
@@ -1028,6 +1029,29 @@ def _accumulate_fusion(fusion: dict | None, plate_fusion: dict) -> dict:
     return fusion
 
 
+def _write_run_json(catalog_result: "CatalogBuildResult") -> None:
+    """Write run.json with the catalog's final row counts (plan.md section 25).
+
+    Stage 12 (plan.md section 21) requires run.json to carry the final row
+    counts before ``_SUCCESS`` is written; unknown fields are preserved by
+    ``Run.write_run_json`` and missing plan-required fields become null.
+    """
+    from rerx.runs import Run, git_commit, utc_now
+
+    Run(run_id=RUN_ID, root=RUN_DIR).write_run_json(
+        {
+            "scope": os.environ.get("RERX_SCOPE", "pilot"),
+            "created_at_utc": utc_now().isoformat(),
+            "git_commit": git_commit(REPO),
+            "status": "success",
+            "catalog_row_counts": {
+                table.table: table.row_count for table in catalog_result.tables
+            },
+            "catalog_skipped_tables": catalog_result.skipped_tables,
+        }
+    )
+
+
 def cmd_complete_full() -> None:
     """Aggregate every plate and mark a full run successful only when complete."""
     from rerx.catalog import build_run_catalog
@@ -1088,12 +1112,14 @@ def cmd_complete_full() -> None:
     )
     log_stage("complete_full stage=write_summaries_done")
     log_stage("complete_full stage=catalog_start")
-    build_run_catalog(
+    catalog_result = build_run_catalog(
         run_root=RUN_DIR,
         catalog_path=RUN_DIR / "catalog" / "run.ducklake",
         data_path=RUN_DIR / "catalog" / "ducklake_data",
     )
     log_stage("complete_full stage=catalog_done")
+    _write_run_json(catalog_result)
+    log_stage("complete_full stage=run_json_written")
     (RUN_DIR / "_SUCCESS").write_text(RUN_ID + "\n")
     log_stage("complete_full stage=success_marker_written")
     _log(f"full run complete: {len(expected)} plates -> {RUN_DIR}")
@@ -1115,11 +1141,12 @@ def cmd_publish() -> None:
     for profiler in ("cellprofiler", "morphem"):
         if not list((RUN_DIR / "projection" / profiler).glob("**/scores.parquet")):
             raise FileNotFoundError(f"missing {profiler} projection scores")
-    build_run_catalog(
+    catalog_result = build_run_catalog(
         run_root=RUN_DIR,
         catalog_path=RUN_DIR / "catalog" / "run.ducklake",
         data_path=RUN_DIR / "catalog" / "ducklake_data",
     )
+    _write_run_json(catalog_result)
     (RUN_DIR / "_SUCCESS").write_text(RUN_ID + "\n")
     _log(f"run complete: {RUN_DIR}")
 
