@@ -29,14 +29,12 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
-      # (duplicate Install uv removed)
       - name: Install the latest version of uv
         uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: false
       - name: Install docs dependencies
         run: uv pip install .[docs]
-      # (duplicate Install uv removed)
       - name: Build documentation
         run: |
           mkdir pages
