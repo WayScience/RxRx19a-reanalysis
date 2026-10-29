@@ -331,7 +331,10 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
             catalog_path=catalog_path,
             data_path=data_path,
             tables=[
-                CatalogTableResult(table="crops", files=[catalog_path], row_count=1)
+                CatalogTableResult(table="crops", files=[catalog_path], row_count=1),
+                CatalogTableResult(
+                    table="fused_feature_selected", files=[catalog_path], row_count=2
+                ),
             ],
             skipped_tables=[],
         )
@@ -362,7 +365,90 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
     assert summary["totals"]["plates_finalized"] == 2
     run_json = json.loads((tasks.RUN_DIR / "run.json").read_text())
     assert run_json["status"] == "success"
-    assert run_json["catalog_row_counts"] == {"crops": 1}
+    assert run_json["catalog_row_counts"] == {
+        "crops": 1,
+        "fused_feature_selected": 2,
+    }
+    assert run_json["crop_count"] == 1
+    assert run_json["cell_count"] == 2  # fused cell rows, not the crops table
+
+
+def test_complete_full_crash_between_run_json_and_marker_keeps_run_incomplete(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A crash after run.json but before _SUCCESS must not claim success."""
+    from rerx import catalog
+    from rerx.catalog import CatalogBuildResult, CatalogTableResult
+    from rerx.runs import Run
+
+    tasks = _load_tasks(monkeypatch, tmp_path)
+    plate_id = "HRCE-1-Plate1"
+    _shard_id, _me, _selected = _stage_one_plate_fixture(tasks, plate_id)
+    monkeypatch.setattr(
+        tasks, "_validate_run_streaming", lambda *_args, **_kwargs: {"passed": True}
+    )
+
+    def fake_finalize(profiles, profiler, buscar, selection):
+        next(profiles)
+        _fake_finalize_profile(tasks, profiler, selection)
+        from rerx.run_summary import PlateSummary
+
+        return [
+            PlateSummary(
+                experiment="HRCE-1",
+                plate="1",
+                profiler=profiler,
+                n_cells_input=1,
+                n_cells_flagged_outlier=0,
+                n_cells_normalized=1,
+                n_feature_selected_cols=1,
+                control_separation_passed=True,
+                control_separation_skipped=False,
+                control_separation_median_effect_size=1.0,
+                buscar_status="scored",
+                buscar_skipped_reason=None,
+            )
+        ]
+
+    monkeypatch.setattr(tasks, "_finalize_profiles", fake_finalize)
+    tasks.cmd_finalize_plate(plate_id)
+
+    def fake_catalog(*, run_root, catalog_path, data_path):
+        catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        catalog_path.write_text("test catalog")
+        return CatalogBuildResult(
+            catalog_path=catalog_path,
+            data_path=data_path,
+            tables=[
+                CatalogTableResult(table="crops", files=[catalog_path], row_count=1)
+            ],
+            skipped_tables=[],
+        )
+
+    monkeypatch.setattr(catalog, "build_run_catalog", fake_catalog)
+    # Simulate the process dying right after run.json is written but
+    # before _SUCCESS: the marker write raises as if the task crashed.
+    real_write_text = Path.write_text
+
+    def crash_on_success_marker(
+        self: Path,
+        data: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> int:
+        if self.name == "_SUCCESS":
+            raise OSError("simulated crash before _SUCCESS")
+        return real_write_text(self, data, encoding, errors, newline)
+
+    monkeypatch.setattr(Path, "write_text", crash_on_success_marker)
+    with pytest.raises(OSError, match="simulated crash"):
+        tasks.cmd_complete_full()
+    assert not (tasks.RUN_DIR / "_SUCCESS").exists()
+    run_json = json.loads((tasks.RUN_DIR / "run.json").read_text())
+    assert run_json["status"] != "success"
+    run = Run(run_id=tasks.RUN_ID, root=tasks.RUN_DIR)
+    assert run.status() != "success"
 
 
 def test_complete_full_rejects_missing_artifacts_and_unplanned_shards(

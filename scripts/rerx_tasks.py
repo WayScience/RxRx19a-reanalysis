@@ -1029,27 +1029,46 @@ def _accumulate_fusion(fusion: dict | None, plate_fusion: dict) -> dict:
     return fusion
 
 
-def _write_run_json(catalog_result: "CatalogBuildResult") -> None:
+def _write_run_json(catalog_result: "CatalogBuildResult") -> dict:
     """Write run.json with the catalog's final row counts (plan.md section 25).
 
     Stage 12 (plan.md section 21) requires run.json to carry the final row
-    counts before ``_SUCCESS`` is written; unknown fields are preserved by
-    ``Run.write_run_json`` and missing plan-required fields become null.
+    counts before ``_SUCCESS`` is written. This runs BEFORE the marker, so
+    the status is recorded as ``incomplete``; ``_finalize_run_json`` flips
+    it to ``success`` only after the marker exists. A crash in between can
+    leave a false *incomplete*, never a false *success*.
     """
     from rerx.runs import Run, git_commit, utc_now
 
-    Run(run_id=RUN_ID, root=RUN_DIR).write_run_json(
-        {
-            "scope": os.environ.get("RERX_SCOPE", "pilot"),
-            "created_at_utc": utc_now().isoformat(),
-            "git_commit": git_commit(REPO),
-            "status": "success",
-            "catalog_row_counts": {
-                table.table: table.row_count for table in catalog_result.tables
-            },
-            "catalog_skipped_tables": catalog_result.skipped_tables,
-        }
-    )
+    row_counts = {table.table: table.row_count for table in catalog_result.tables}
+    payload = {
+        "scope": os.environ.get("RERX_SCOPE", "pilot"),
+        "created_at_utc": utc_now().isoformat(),
+        "git_commit": git_commit(REPO),
+        "status": "incomplete",
+        # Plan.md section 25 counts, taken from the verified catalog tables.
+        # cell_count is the fused cell-profile total (the run's headline
+        # row count); crop_count is the single-cell crop rows.
+        "cell_count": row_counts.get("fused_feature_selected"),
+        "crop_count": row_counts.get("crops"),
+        "morphem_profile_count": row_counts.get("morphem_raw"),
+        "catalog_row_counts": row_counts,
+        "catalog_skipped_tables": catalog_result.skipped_tables,
+    }
+    Run(run_id=RUN_ID, root=RUN_DIR).write_run_json(payload)
+    return payload
+
+
+def _finalize_run_json() -> None:
+    """Rewrite run.json with ``status: success`` after ``_SUCCESS`` exists."""
+    from rerx.runs import Run
+
+    if not (RUN_DIR / "_SUCCESS").exists():
+        raise FileNotFoundError("_SUCCESS marker missing; run is not complete")
+    run = Run(run_id=RUN_ID, root=RUN_DIR)
+    data = run.read_run_json()
+    data["status"] = "success"
+    run.write_run_json(data)
 
 
 def cmd_complete_full() -> None:
@@ -1121,6 +1140,7 @@ def cmd_complete_full() -> None:
     _write_run_json(catalog_result)
     log_stage("complete_full stage=run_json_written")
     (RUN_DIR / "_SUCCESS").write_text(RUN_ID + "\n")
+    _finalize_run_json()
     log_stage("complete_full stage=success_marker_written")
     _log(f"full run complete: {len(expected)} plates -> {RUN_DIR}")
 
@@ -1148,6 +1168,7 @@ def cmd_publish() -> None:
     )
     _write_run_json(catalog_result)
     (RUN_DIR / "_SUCCESS").write_text(RUN_ID + "\n")
+    _finalize_run_json()
     _log(f"run complete: {RUN_DIR}")
 
 
