@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from rerx.runs import Run
+import pytest
+
+from rerx.runs import RUN_JSON_FIELDS, Run
 
 
 def _run(tmp_path: Path) -> Run:
@@ -36,15 +39,9 @@ def test_status_is_unknown_without_run_json(tmp_path: Path) -> None:
     assert run.status() == "unknown"
 
 
-def test_write_run_json_fills_missing_plan_fields_with_null(
-    tmp_path: Path,
-) -> None:
-    from rerx.runs import RUN_JSON_FIELDS
-
+def test_write_run_json_fills_missing_plan_fields_with_null(tmp_path: Path) -> None:
     run = _run(tmp_path)
     path = run.write_run_json({"status": "incomplete", "custom_field": 1})
-    import json
-
     payload = json.loads(path.read_text())
     assert payload["run_id"] == run.run_id
     assert payload["status"] == "incomplete"
@@ -52,3 +49,29 @@ def test_write_run_json_fills_missing_plan_fields_with_null(
     for key in RUN_JSON_FIELDS:
         assert key in payload
     assert payload["cell_count"] is None
+
+
+def test_write_run_json_is_atomic_and_leaves_no_temp_file(tmp_path: Path) -> None:
+    """run.json must be replaced atomically; readers never see a partial file."""
+    run = _run(tmp_path)
+    run.write_run_json({"status": "incomplete"})
+    path = run.write_run_json({"status": "success", "extra": [1, 2]})
+    payload = json.loads(path.read_text())
+    assert payload["status"] == "success"
+    assert payload["extra"] == [1, 2]
+    # No leftover temp files beside run.json.
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name != "run.json"]
+    assert leftovers == []
+
+
+def test_write_run_json_preserves_previous_file_on_serialization_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A payload that cannot serialize must not clobber the existing run.json."""
+    run = _run(tmp_path)
+    run.write_run_json({"status": "incomplete"})
+    original = (tmp_path / "run.json").read_text()
+    with pytest.raises(TypeError):
+        run.write_run_json({"status": "success", "bad": object()})  # type: ignore[dict-item]
+    assert (tmp_path / "run.json").read_text() == original
