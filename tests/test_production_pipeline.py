@@ -6,11 +6,29 @@ import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
 
 from rerx import metadata
+
+
+def _dist_version(name: str) -> str:
+    """Installed distribution version for a Python package (best effort)."""
+    import importlib.metadata
+
+    return importlib.metadata.version(name)
+
+
+def _hash(path: Path) -> str:
+    """Hex sha256 of a file, matching rerx.manifest.sha256_file."""
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+_MORPHEM_MODEL_REVISION = "0e8d58787421f83f975634d72420d85c5dfc9c2c"
 
 
 def _load_tasks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -258,11 +276,16 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     from rerx import catalog
+    from rerx.catalog import CatalogBuildResult, CatalogTableResult
     from rerx.run_summary import PlateSummary
 
     tasks = _load_tasks(monkeypatch, tmp_path)
     plate_id = "HRCE-1-Plate1"
     _shard_id, _me, _selected = _stage_one_plate_fixture(tasks, plate_id)
+    # Real hashable container files, so run.json records real hashes.
+    tasks.SIF.parent.mkdir(parents=True, exist_ok=True)
+    tasks.SIF.write_bytes(b"cellprofiler sif")
+    tasks.MORPHEM_SIF.write_bytes(b"morphem sif")
     monkeypatch.setattr(
         tasks, "_validate_run_streaming", lambda *_args, **_kwargs: {"passed": True}
     )
@@ -319,17 +342,220 @@ def test_plate_finalize_and_complete_write_success_only_at_end(
     assert positions == sorted(positions)
     assert "rows=1 columns=" in output
     assert not (tasks.RUN_DIR / "_SUCCESS").exists()
+    assert not (tasks.RUN_DIR / "run.json").exists()
     assert (tasks.RUN_DIR / "qc" / "plates" / f"{plate_id}.json").is_file()
 
     def fake_catalog(*, run_root, catalog_path, data_path):
         catalog_path.parent.mkdir(parents=True, exist_ok=True)
         catalog_path.write_text("test catalog")
+        return CatalogBuildResult(
+            catalog_path=catalog_path,
+            data_path=data_path,
+            tables=[
+                CatalogTableResult(table="crops", files=[catalog_path], row_count=1),
+                CatalogTableResult(
+                    table="fused_feature_selected", files=[catalog_path], row_count=2
+                ),
+            ],
+            skipped_tables=[],
+        )
 
     monkeypatch.setattr(catalog, "build_run_catalog", fake_catalog)
     tasks.cmd_complete_full()
+    completion_output = capsys.readouterr().out
+    completion_stages = [
+        "start",
+        "validate_shards_start",
+        "validate_shards_done",
+        "validate_plates_start",
+        "validate_plates_done",
+        "write_summaries_start",
+        "write_summaries_done",
+        "catalog_start",
+        "catalog_done",
+        "run_json_written",
+        "success_marker_written",
+    ]
+    positions = [
+        completion_output.index(f"complete_full stage={stage} ")
+        for stage in completion_stages
+    ]
+    assert positions == sorted(positions)
     assert (tasks.RUN_DIR / "_SUCCESS").read_text() == tasks.RUN_ID + "\n"
     summary = json.loads((tasks.RUN_DIR / "run_summary.json").read_text())
     assert summary["totals"]["plates_finalized"] == 2
+    run_json = json.loads((tasks.RUN_DIR / "run.json").read_text())
+    assert run_json["status"] == "success"
+    assert run_json["catalog_row_counts"] == {
+        "crops": 1,
+        "fused_feature_selected": 2,
+    }
+    assert run_json["crop_count"] == 1
+    assert run_json["cell_count"] == 2  # fused cell rows, not the crops table
+    assert run_json["cellprofiler_pipeline_hash"] == _hash(tasks._pipeline_path())
+    assert run_json["cellprofiler_container_hash"] == _hash(tasks.SIF)
+    assert run_json["morphem_container_hash"] == _hash(tasks.MORPHEM_SIF)
+    assert run_json["morphem_model_revision"] == _MORPHEM_MODEL_REVISION
+    assert run_json["pycytominer_version"] == _dist_version("pycytominer")
+    assert run_json["buscar_version"] == _dist_version("buscar")
+    assert run_json["cellprofiler_version"] is None  # from container at run time
+
+
+def test_complete_full_crash_between_run_json_and_marker_keeps_run_incomplete(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A crash after run.json but before _SUCCESS must not claim success."""
+    from rerx import catalog
+    from rerx.catalog import CatalogBuildResult, CatalogTableResult
+    from rerx.runs import Run
+
+    tasks = _load_tasks(monkeypatch, tmp_path)
+    plate_id = "HRCE-1-Plate1"
+    _shard_id, _me, _selected = _stage_one_plate_fixture(tasks, plate_id)
+    monkeypatch.setattr(
+        tasks, "_validate_run_streaming", lambda *_args, **_kwargs: {"passed": True}
+    )
+
+    def fake_finalize(profiles, profiler, buscar, selection):
+        next(profiles)
+        _fake_finalize_profile(tasks, profiler, selection)
+        from rerx.run_summary import PlateSummary
+
+        return [
+            PlateSummary(
+                experiment="HRCE-1",
+                plate="1",
+                profiler=profiler,
+                n_cells_input=1,
+                n_cells_flagged_outlier=0,
+                n_cells_normalized=1,
+                n_feature_selected_cols=1,
+                control_separation_passed=True,
+                control_separation_skipped=False,
+                control_separation_median_effect_size=1.0,
+                buscar_status="scored",
+                buscar_skipped_reason=None,
+            )
+        ]
+
+    monkeypatch.setattr(tasks, "_finalize_profiles", fake_finalize)
+    tasks.cmd_finalize_plate(plate_id)
+
+    def fake_catalog(*, run_root, catalog_path, data_path):
+        catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        catalog_path.write_text("test catalog")
+        return CatalogBuildResult(
+            catalog_path=catalog_path,
+            data_path=data_path,
+            tables=[
+                CatalogTableResult(table="crops", files=[catalog_path], row_count=1)
+            ],
+            skipped_tables=[],
+        )
+
+    monkeypatch.setattr(catalog, "build_run_catalog", fake_catalog)
+    # Simulate the process dying right after run.json is written but
+    # before _SUCCESS: the marker write raises as if the task crashed.
+    real_write_text = Path.write_text
+
+    def crash_on_success_marker(
+        self: Path,
+        data: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> int:
+        if self.name == "_SUCCESS":
+            raise OSError("simulated crash before _SUCCESS")
+        return real_write_text(self, data, encoding, errors, newline)
+
+    monkeypatch.setattr(Path, "write_text", crash_on_success_marker)
+    with pytest.raises(OSError, match="simulated crash"):
+        tasks.cmd_complete_full()
+    assert not (tasks.RUN_DIR / "_SUCCESS").exists()
+    run_json = json.loads((tasks.RUN_DIR / "run.json").read_text())
+    assert run_json["status"] != "success"
+    run = Run(run_id=tasks.RUN_ID, root=tasks.RUN_DIR)
+    assert run.status() != "success"
+
+
+def test_complete_full_retry_after_marker_clears_stale_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A retry must clear _SUCCESS before rebuilding; a failed rebuild must
+    not leave a stale success marker beside a removed/partial catalog."""
+    from rerx import catalog
+    from rerx.catalog import CatalogBuildResult, CatalogTableResult
+    from rerx.runs import Run
+
+    tasks = _load_tasks(monkeypatch, tmp_path)
+    plate_id = "HRCE-1-Plate1"
+    _shard_id, _me, _selected = _stage_one_plate_fixture(tasks, plate_id)
+    monkeypatch.setattr(
+        tasks, "_validate_run_streaming", lambda *_args, **_kwargs: {"passed": True}
+    )
+    from rerx.run_summary import PlateSummary
+
+    def fake_finalize(profiles, profiler, buscar, selection):
+        next(profiles)
+        _fake_finalize_profile(tasks, profiler, selection)
+        return [
+            PlateSummary(
+                experiment="HRCE-1",
+                plate="1",
+                profiler=profiler,
+                n_cells_input=1,
+                n_cells_flagged_outlier=0,
+                n_cells_normalized=1,
+                n_feature_selected_cols=1,
+                control_separation_passed=True,
+                control_separation_skipped=False,
+                control_separation_median_effect_size=1.0,
+                buscar_status="scored",
+                buscar_skipped_reason=None,
+            )
+        ]
+
+    monkeypatch.setattr(tasks, "_finalize_profiles", fake_finalize)
+    tasks.cmd_finalize_plate(plate_id)
+
+    def _result(catalog_path, data_path):
+        catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        catalog_path.write_text("test catalog")
+        return CatalogBuildResult(
+            catalog_path=catalog_path,
+            data_path=data_path,
+            tables=[
+                CatalogTableResult(table="crops", files=[catalog_path], row_count=1)
+            ],
+            skipped_tables=[],
+        )
+
+    def passing_catalog(*, run_root, catalog_path, data_path):
+        return _result(catalog_path, data_path)
+
+    def failing_catalog(*, run_root, catalog_path, data_path):
+        # Real build_run_catalog unlinks an existing catalog before rebuilding.
+        if catalog_path.exists():
+            catalog_path.unlink()
+        raise OSError("catalog write failed on retry")
+
+    # 1. First completion succeeds: _SUCCESS + catalog + finalized run.json.
+    monkeypatch.setattr(catalog, "build_run_catalog", passing_catalog)
+    tasks.cmd_complete_full()
+    assert (tasks.RUN_DIR / "_SUCCESS").is_file()
+    assert (tasks.RUN_DIR / "catalog" / "run.ducklake").is_file()
+    run = Run(run_id=tasks.RUN_ID, root=tasks.RUN_DIR)
+    assert run.status() == "success"
+
+    # 2. Retry with a failing catalog rebuild: the stale marker must be gone
+    #    before the rebuild (and remain gone after its failure).
+    monkeypatch.setattr(catalog, "build_run_catalog", failing_catalog)
+    with pytest.raises(OSError, match="catalog write failed on retry"):
+        tasks.cmd_complete_full()
+    assert not (tasks.RUN_DIR / "_SUCCESS").exists()
+    assert not (tasks.RUN_DIR / "catalog" / "run.ducklake").exists()
+    assert run.status() == "incomplete"
 
 
 def test_complete_full_rejects_missing_artifacts_and_unplanned_shards(
@@ -477,9 +703,31 @@ def test_full_plate_finalization_runs_real_analysis_on_small_fixture(
     )
     assert {p["profiler"] for p in summary["plates"]} == {"cellprofiler", "morphem"}
     assert summary["fusion"]["rows"] == cells
+    with monkeypatch.context() as patcher:
+        patcher.setattr(
+            "rerx.catalog.build_run_catalog",
+            Mock(side_effect=OSError("catalog write failed")),
+        )
+        with pytest.raises(OSError, match="catalog write failed"):
+            tasks.cmd_complete_full()
+    assert (
+        not (tasks.RUN_DIR / "_SUCCESS").exists()
+        and not (tasks.RUN_DIR / "run.json").exists()
+    )
+    pd.testing.assert_frame_equal(
+        pd.read_parquet(
+            tasks.RUN_DIR
+            / "profiles/fused/feature_selected"
+            / "experiment=HRCE-1/plate=25/profiles.parquet"
+        ),
+        fused,
+    )
+    # Retry only completion, reusing the already finalized plate.
     tasks.cmd_complete_full()
-    assert (tasks.RUN_DIR / "catalog" / "run.ducklake").is_file()
-    assert (tasks.RUN_DIR / "_SUCCESS").is_file()
+    assert json.loads((tasks.RUN_DIR / "run.json").read_text())["status"] == "success"
+    assert (tasks.RUN_DIR / "_SUCCESS").is_file() and (
+        tasks.RUN_DIR / "catalog" / "run.ducklake"
+    ).is_file()
 
 
 def test_full_completion_waits_for_every_plate(
@@ -502,6 +750,51 @@ def test_publish_requires_completed_upstream_stages(
     with pytest.raises(FileNotFoundError, match="run_summary"):
         tasks.cmd_publish()
     assert not (tasks.RUN_DIR / "_SUCCESS").exists()
+
+
+def test_publish_writes_run_json_with_counts_before_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Publish must record catalog counts in run.json before _SUCCESS."""
+    from rerx import catalog
+    from rerx.catalog import CatalogBuildResult, CatalogTableResult
+
+    tasks = _load_tasks(monkeypatch, tmp_path)
+    tasks.RUN_DIR.mkdir(parents=True)
+    (tasks.RUN_DIR / "run_summary.json").write_text("{}")
+    baseline = (
+        tasks.RUN_DIR
+        / "baseline"
+        / "recursion_site_embeddings"
+        / "recursion_site_embeddings.parquet"
+    )
+    baseline.parent.mkdir(parents=True)
+    baseline.write_bytes(b"embeddings")
+    for profiler in ("cellprofiler", "morphem"):
+        scores = tasks.RUN_DIR / "projection" / profiler / "p" / "scores.parquet"
+        scores.parent.mkdir(parents=True)
+        scores.write_bytes(b"scores")
+
+    def fake_catalog(*, run_root, catalog_path, data_path):
+        catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        catalog_path.write_text("test catalog")
+        return CatalogBuildResult(
+            catalog_path=catalog_path,
+            data_path=data_path,
+            tables=[
+                CatalogTableResult(
+                    table="recursion_site_embeddings", files=[catalog_path], row_count=3
+                )
+            ],
+            skipped_tables=[],
+        )
+
+    monkeypatch.setattr(catalog, "build_run_catalog", fake_catalog)
+    tasks.cmd_publish()
+    run_json = json.loads((tasks.RUN_DIR / "run.json").read_text())
+    assert run_json["status"] == "success"
+    assert run_json["catalog_row_counts"] == {"recursion_site_embeddings": 3}
+    assert (tasks.RUN_DIR / "_SUCCESS").is_file()
 
 
 def test_planned_shards_require_all_four_artifacts(

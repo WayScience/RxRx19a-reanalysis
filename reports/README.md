@@ -5,6 +5,12 @@ Plate 25, pipeline report from run `pilot-x8`). Each report embeds its data
 directly, so it opens and works from a plain file:// URL with no server, no
 network, and no build step.
 
+## Scope of these reports
+
+These HTML reports have not been refreshed for the latest full production run, `rxrx19a-full-20261015T223716Z-g83c9641`.
+The production results location, QC summaries, and interpretation limits are documented in the [project README](../README.md#reports-and-current-findings).
+Use that section for the current production status rather than the pilot plots below.
+
 - `phenotypic_overview.html` — compares CellProfiler features against
   Recursion's published deep-learning site embeddings and MorphEm
   per-cell embeddings (PCA plots, Spearman correlations of

@@ -47,6 +47,7 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
+    from rerx.catalog import CatalogBuildResult
     from rerx.run_summary import PlateSummary
 
 RUN_DIR = Path(os.environ["RERX_RUN_DIR"])
@@ -1028,12 +1029,102 @@ def _accumulate_fusion(fusion: dict | None, plate_fusion: dict) -> dict:
     return fusion
 
 
+def _tool_versions_and_hashes() -> dict:
+    """Plan-required tool versions and hashes for run.json (plan.md section 25).
+
+    CellProfiler's own version comes from the pinned container at run
+    time (``cellprofiler --version``); the CellProfiler wheel is not
+    installed in this environment, so fall back to the pinned container
+    tag recorded in src/rerx/cellprofiler.py.
+    """
+    import importlib.metadata
+
+    from rerx.cellprofiler import (
+        CELLPROFILER_CONTAINER_IMAGE,
+        container_hash,
+    )
+    from rerx.morphem import MORPHEM_MODEL_REVISION
+
+    def dist_version(name: str) -> str | None:
+        try:
+            return importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            return None
+
+    def hash_if_exists(path: Path) -> str | None:
+        try:
+            return container_hash(path)
+        except FileNotFoundError:
+            return None
+
+    return {
+        "cellprofiler_version": None,  # filled from the container at run time
+        "cellprofiler_pipeline_hash": hash_if_exists(
+            REPO / "pipelines" / "rxrx19a.cppipe"
+        ),
+        "cellprofiler_container_hash": hash_if_exists(SIF),
+        "morphem_model_revision": MORPHEM_MODEL_REVISION,
+        "morphem_container_hash": hash_if_exists(MORPHEM_SIF),
+        "pycytominer_version": dist_version("pycytominer"),
+        "buscar_version": dist_version("buscar"),
+        "cellprofiler_container_image": CELLPROFILER_CONTAINER_IMAGE,
+    }
+
+
+def _write_run_json(catalog_result: "CatalogBuildResult") -> dict:
+    """Write run.json with the catalog's final row counts (plan.md section 25).
+
+    Stage 12 (plan.md section 21) requires run.json to carry the final row
+    counts before ``_SUCCESS`` is written. This runs BEFORE the marker, so
+    the status is recorded as ``incomplete``; ``_finalize_run_json`` flips
+    it to ``success`` only after the marker exists. A crash in between can
+    leave a false *incomplete*, never a false *success*.
+    """
+    from rerx.runs import Run, git_commit, utc_now
+
+    row_counts = {table.table: table.row_count for table in catalog_result.tables}
+    payload = {
+        "scope": os.environ.get("RERX_SCOPE", "pilot"),
+        "created_at_utc": utc_now().isoformat(),
+        "git_commit": git_commit(REPO),
+        "status": "incomplete",
+        # Plan.md section 25 counts, taken from the verified catalog tables.
+        # cell_count is the fused cell-profile total (the run's headline
+        # row count); crop_count is the single-cell crop rows.
+        "cell_count": row_counts.get("fused_feature_selected"),
+        "crop_count": row_counts.get("crops"),
+        "morphem_profile_count": row_counts.get("morphem_raw"),
+        "catalog_row_counts": row_counts,
+        "catalog_skipped_tables": catalog_result.skipped_tables,
+        **_tool_versions_and_hashes(),
+    }
+    Run(run_id=RUN_ID, root=RUN_DIR).write_run_json(payload)
+    return payload
+
+
+def _finalize_run_json() -> None:
+    """Rewrite run.json with ``status: success`` after ``_SUCCESS`` exists.
+
+    Marker-independent: called immediately after the marker write, so the
+    marker is present, but no guard depends on re-reading it (a crashed
+    retry between marker clear and rewrite already reset the status).
+    """
+    from rerx.runs import Run
+
+    run = Run(run_id=RUN_ID, root=RUN_DIR)
+    data = run.read_run_json()
+    data["status"] = "success"
+    run.write_run_json(data)
+
+
 def cmd_complete_full() -> None:
     """Aggregate every plate and mark a full run successful only when complete."""
     from rerx.catalog import build_run_catalog
+    from rerx.diagnostics import log_stage
     from rerx.fuse import write_fusion_sidecar
     from rerx.run_summary import RunSummary, write_run_summary
 
+    log_stage("complete_full stage=start", run_id=RUN_ID)
     plans = sorted((RUN_DIR / "plate-plans").glob("*.json"))
     expected = {path.stem for path in plans}
     observed = {path.stem for path in (RUN_DIR / "qc" / "plates").glob("*.json")}
@@ -1053,6 +1144,7 @@ def cmd_complete_full() -> None:
             f"plate plans omit {len(expected_shards - planned_shards)} shards "
             f"from shards.json; unexpected {len(planned_shards - expected_shards)}"
         )
+    log_stage("complete_full stage=validate_shards_start", shards=len(expected_shards))
     _verify_planned_shards(
         expected_shards,
         sorted((SCRATCH / RUN_ID / "cytotable").glob("*.parquet")),
@@ -1060,8 +1152,10 @@ def cmd_complete_full() -> None:
         sorted((RUN_DIR / "profiles" / "morphem" / "raw").glob("*.parquet")),
         sorted(SCRATCH.glob(f"{RUN_ID}/*/output/*.sqlite")),
     )
+    log_stage("complete_full stage=validate_shards_done", shards=len(expected_shards))
     summaries = []
     fusion: dict | None = None
+    log_stage("complete_full stage=validate_plates_start", plates=len(expected))
     for plate_id in sorted(expected):
         result = json.loads(
             (RUN_DIR / "qc" / "plates" / f"{plate_id}.json").read_text()
@@ -1070,6 +1164,8 @@ def cmd_complete_full() -> None:
         summaries.extend(_verify_completed_plate(plate_id, plan, result))
         fusion = _accumulate_fusion(fusion, result["fusion"])
     assert fusion is not None
+    log_stage("complete_full stage=validate_plates_done", plates=len(expected))
+    log_stage("complete_full stage=write_summaries_start")
     write_fusion_sidecar(RUN_DIR, fusion)
     write_run_summary(
         RunSummary(
@@ -1079,12 +1175,25 @@ def cmd_complete_full() -> None:
         ),
         RUN_DIR / "run_summary.json",
     )
-    build_run_catalog(
+    log_stage("complete_full stage=write_summaries_done")
+    # Clear the success marker BEFORE rebuilding: build_run_catalog removes
+    # the existing catalog first, so a failed rebuild retry must not leave
+    # a stale _SUCCESS beside a deleted/partial catalog.
+    if (RUN_DIR / "_SUCCESS").exists():
+        (RUN_DIR / "_SUCCESS").unlink()
+        log_stage("complete_full stage=stale_marker_cleared")
+    log_stage("complete_full stage=catalog_start")
+    catalog_result = build_run_catalog(
         run_root=RUN_DIR,
         catalog_path=RUN_DIR / "catalog" / "run.ducklake",
         data_path=RUN_DIR / "catalog" / "ducklake_data",
     )
+    log_stage("complete_full stage=catalog_done")
+    _write_run_json(catalog_result)
+    log_stage("complete_full stage=run_json_written")
     (RUN_DIR / "_SUCCESS").write_text(RUN_ID + "\n")
+    _finalize_run_json()
+    log_stage("complete_full stage=success_marker_written")
     _log(f"full run complete: {len(expected)} plates -> {RUN_DIR}")
 
 
@@ -1104,12 +1213,19 @@ def cmd_publish() -> None:
     for profiler in ("cellprofiler", "morphem"):
         if not list((RUN_DIR / "projection" / profiler).glob("**/scores.parquet")):
             raise FileNotFoundError(f"missing {profiler} projection scores")
-    build_run_catalog(
+    # Clear the success marker BEFORE rebuilding: build_run_catalog removes
+    # the existing catalog first, so a failed rebuild retry must not leave
+    # a stale _SUCCESS beside a deleted/partial catalog.
+    if (RUN_DIR / "_SUCCESS").exists():
+        (RUN_DIR / "_SUCCESS").unlink()
+    catalog_result = build_run_catalog(
         run_root=RUN_DIR,
         catalog_path=RUN_DIR / "catalog" / "run.ducklake",
         data_path=RUN_DIR / "catalog" / "ducklake_data",
     )
+    _write_run_json(catalog_result)
     (RUN_DIR / "_SUCCESS").write_text(RUN_ID + "\n")
+    _finalize_run_json()
     _log(f"run complete: {RUN_DIR}")
 
 

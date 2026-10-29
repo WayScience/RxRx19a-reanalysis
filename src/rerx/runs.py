@@ -7,7 +7,9 @@ directory layout, status markers, run.json contents, and run listing.
 
 import datetime
 import json
+import os
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -261,15 +263,27 @@ class Run:
         Write ``run.json`` with plan-required fields (plan.md section 25).
 
         Unknown fields are preserved; missing known fields are filled with
-        ``None`` so consumers can rely on the full schema.
+        ``None`` so consumers can rely on the full schema. ``run_id`` always
+        comes from the run itself and cannot be overridden by ``data``.
         """
-        payload: dict[str, object] = {"run_id": self.run_id}
-        for key in RUN_JSON_FIELDS:
-            payload[key] = data.get(key)
+        payload: dict[str, object] = {key: data.get(key) for key in RUN_JSON_FIELDS}
         payload.update(data)
+        payload["run_id"] = self.run_id
         path = self.run_json_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        # Serialize fully in memory, then replace atomically so a crash
+        # mid-write can never leave a truncated run.json for readers.
+        content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        fd, tmp_name = tempfile.mkstemp(
+            dir=path.parent, prefix=".run.json.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as tmp:
+                tmp.write(content)
+            os.replace(tmp_name, path)
+        except BaseException:
+            os.unlink(tmp_name)
+            raise
         return path
 
     def read_run_json(self) -> dict:
@@ -277,7 +291,12 @@ class Run:
         return json.loads(self.run_json_path().read_text())
 
     def status(self) -> str:
-        """Derive run status from markers, falling back to run.json."""
+        """Derive run status from markers, falling back to run.json.
+
+        A ``success`` value recorded in ``run.json`` is only trusted when
+        the ``_SUCCESS`` marker exists; the marker is the completion gate
+        (plan.md Stage 12), so a premature claim reads as ``incomplete``.
+        """
         for marker, label in (
             (SUCCESS, "success"),
             (MIRRORED, "mirrored"),
@@ -287,9 +306,13 @@ class Run:
             if self.has_marker(marker):
                 return label
         try:
-            return self.read_run_json().get("status") or "unknown"
+            recorded = self.read_run_json().get("status") or "unknown"
         except (FileNotFoundError, json.JSONDecodeError):
             return "unknown"
+        if recorded == "success":
+            # _SUCCESS was already checked above and is absent.
+            return "incomplete"
+        return recorded
 
 
 @dataclass
