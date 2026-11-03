@@ -19,7 +19,7 @@ unless the caller supplies a different ``parsl_config``.
 """
 
 import hashlib
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -132,7 +132,7 @@ def local_threads_parsl_config() -> "parsl.Config":
 
 
 @contextmanager
-def atomic_parquet_output(dest_path: Path) -> Iterator[Path]:
+def atomic_parquet_output(dest_path: Path) -> Generator[Path]:
     """Yield a fresh path; publish only a completed, readable Parquet file.
 
     A failed attempt leaves the existing destination untouched. Legacy
