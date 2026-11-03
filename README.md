@@ -5,6 +5,10 @@ SARS-CoV-2-infected cells toward a healthy appearance.
 The pipeline is specific to RxRx19a, though some parts can be reused with
 other datasets.
 
+🗂️ See the [project card](PROJECT_CARD.md) for a structured overview of this
+project's design, biological materials, assay, imaging setup, and data
+locations.
+
 ## Latest verified production results
 
 As of October 28, 2026, the latest verified full run is
