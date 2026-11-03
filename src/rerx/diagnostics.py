@@ -1,7 +1,7 @@
 """Flushed stage boundaries without inspecting or retaining profile contents."""
 
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -67,7 +67,7 @@ def stage(
     plate: str,
     profiler: str,
     shape: tuple[int, int],
-) -> Iterator[StageProgress]:
+) -> Generator[StageProgress]:
     """Log start/end or failure, preserving ordinary exception propagation."""
     progress = StageProgress(shape)
     started = monotonic()
