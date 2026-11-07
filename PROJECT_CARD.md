@@ -6,41 +6,41 @@ Keep every section; "N/A" entries carry a one-line reason.
 
 # ReRx: RxRx19a Reanalysis — Project Card
 
-> ReRx reanalyzes the public Recursion RxRx19a high-content imaging dataset to
-> ask whether treatments move SARS-CoV-2-infected cells toward the mock-cell
-> morphology. It processes all 305,520 five-channel images (48.2M detected
-> cells) through CellProfiler, MorphEm, and the BU-SCAR (buscar) scoring
-> pipeline, and has completed a verified full production run on Alpine.
+> ReRx reanalyzes the public RxRx19a dataset to ask whether treatments move infected cells toward an uninfected appearance.
+> The full production run produced CellProfiler and MorphEm profiles for 305,520 five-channel imaging sites.
+> Technical processing completed, but the control-separation test failed on all 57 plates for both profilers, causing 114 buscar skips.
+> Full-run buscar scores and signatures are unavailable ([production results](README.md#reports-and-current-findings)).
 
 ## 1. Overview
 
-| Field                | Value                                                                                                                                              |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Project name         | ReRx — RxRx19a reanalysis                                                                                                                          |
-| Status               | complete (full production run verified Oct 28, 2026)                                                                                               |
-| Data classification  | open                                                                                                                                               |
-| Owner(s)             | Dave Bunten (d33bs), WayScience / CU Anschutz                                                                                                      |
-| Related repositories | https://github.com/WayScience/RxRx19a-reanalysis (this project's upstream); https://github.com/recursionpharma/rxrx-datasets (source dataset docs) |
-| Related publications | N/A — no project publication yet; RxRx19a dataset: https://www.rxrx.ai/rxrx19a                                                                     |
-| Last updated         | 2026-10-29                                                                                                                                         |
+| Field                | Value                                                                                                                                                    |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project name         | ReRx — RxRx19a reanalysis                                                                                                                                |
+| Status               | full-run — technical processing complete; control-separation test failed on all 57 plates for both profilers (114 skips); no buscar scores or signatures |
+| Data classification  | open                                                                                                                                                     |
+| Owner(s)             | Dave Bunten (d33bs), WayScience / CU Anschutz                                                                                                            |
+| Related repositories | https://github.com/WayScience/RxRx19a-reanalysis (this project's upstream); https://github.com/recursionpharma/rxrx-datasets (source dataset docs)       |
+| Related publications | N/A — no project publication yet; RxRx19a dataset: https://www.rxrx.ai/rxrx19a                                                                           |
+| Last updated         | 2026-11-06                                                                                                                                               |
 
-Data classification governs what this card itself may say. The source dataset
-(RxRx19a) is publicly released by Recursion (BSD-licensed images, open
-metadata), and this repository is public under a BSD 3-Clause license, so
-there are no restricted patient identifiers anywhere in this project.
+The [RxRx19a dataset](https://github.com/recursionpharma/rxrx-datasets/blob/trunk/rxrx19a/README.md#license) uses the Creative Commons Attribution 4.0 International license (CC BY 4.0).
+This repository uses the separate [BSD 3-Clause software license](LICENSE).
+Public access does not remove the dataset attribution requirements.
+This card describes cultured cells and contains no patient identifiers.
 
 ## 2. Design
 
-In plain terms: the disease is SARS-CoV-2 infection (the virus that causes
-COVID-19) grown in cultured kidney cells — human HRCE and monkey Vero. The
-"disease effect" being measured is the morphology change the virus causes in
-those cells, relative to mock-infected cells. The treatments are small-molecule
-compounds added to infected wells at several concentrations (µM) to see
-whether they push the infected cells' appearance back toward the uninfected
-state. Remdesivir (GS-5734) is the known-active positive-control compound, and
-compounds with known weak or no antiviral activity act as negative controls
-(plan.md); each compound's structure is recorded as SMILES in the RxRx19a
-metadata.
+RxRx19a models SARS-CoV-2 infection in cultured human HRCE and monkey Vero kidney cells.
+SARS-CoV-2 is the virus that causes COVID-19.
+ReRx measures changes in cell appearance relative to mock-infected cells (controls without active infection).
+
+For the HRCE suppressor screen, Recursion added compounds about two hours after seeding.
+Infection followed 24 hours after seeding, with fixation, staining, and imaging 96 hours after infection ([study description](https://www.rxrx.ai/rxrx19a)).
+The compounds were tested at several concentrations, recorded in micromolar (µM).
+
+This design tests whether treatment before infection limits the later changes in cell appearance, not whether treatment reverses an established infection.
+[Plan §9](plan.md#9-stage-1-pilot-selection) names Remdesivir (GS-5734) as a preferred positive-control candidate, not a confirmed control for every run.
+The [source metadata](https://github.com/recursionpharma/rxrx-datasets/blob/trunk/rxrx19a/README.md#metadata) records compound names, concentrations, and chemical structures (SMILES).
 
 - Hypothesis / question: Which treatments move SARS-CoV-2-infected cells
   toward the mock-cell morphology while limiting unrelated morphology changes?
@@ -60,8 +60,8 @@ metadata.
 - Plate / batch layout: inherited from RxRx19a metadata; four experiments
   (HRCE-1, HRCE-2, VERO-1, VERO-2), 57 plates, 305,520 sites total.
   Site-level layout is in the metadata.csv file referenced in section 6.
-- Timepoints: N/A — single fixed timepoint per RxRx19a design; no repeated
-  measures.
+- Timepoints: For the HRCE suppressor screen, compounds were added about two hours after seeding and infection occurred 24 hours after seeding.
+  Fixation, staining, and imaging followed 96 hours after infection ([RxRx19a study description](https://www.rxrx.ai/rxrx19a)).
 - Sample size (plates, wells, cell lines): 305,520 imaging sites across 57
   plates in 4 experiments (2 cell lines). Production run output:
   48,191,464 raw cells, 47,075,123 after QC. Pilot selection (base scale):
@@ -93,7 +93,7 @@ metadata.
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
 | Cell type(s) / line(s)                                             | HRCE (human renal cortical epithelial) and Vero (African green monkey kidney epithelial); experiments HRCE-1, HRCE-2, VERO-1, VERO-2 |
 | Tissue of origin                                                   | Kidney epithelium (HRCE: human; Vero: monkey)                                                                                        |
-| Primary vs. immortalized                                           | N/A — not recorded in RxRx19a metadata; both are standard immortalized cell lines                                                    |
+| Primary vs. immortalized                                           | Unknown — the RxRx19a metadata does not record primary versus immortalized status; no shared status is assumed for HRCE and Vero     |
 | Genetic background / perturbation (e.g. CRISPR, isogenic)          | N/A — no engineered lines; infection status is the perturbation (Active SARS-CoV-2, Mock, UV-Inactivated)                            |
 | Control cell line(s) (e.g. a reference line imaged on every plate) | Within-line controls: mock vs. active vs. UV-inactivated SARS-CoV-2 in both HRCE and Vero; no separate control line                  |
 
@@ -140,14 +140,14 @@ embeddings (5 channels × 384) from them.
 
 ## 6. Data
 
-| Field                            | Value                                                                                                                                      |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Raw data location                | https://storage.googleapis.com/rxrx/RxRx19a/images (canonical public bucket; staged locally on Alpine per README "Full run on Alpine")     |
-| Processed data location          | `/pl/active/koala/ReRx/runs/rxrx19a-full-20261015T223716Z-g83c9641/` (Active PetaLibrary; see README "Latest verified production results") |
-| Data access / restrictions       | Open — public dataset and public code; no DUA.                                                                                             |
-| Data use agreement / DUA on file | N/A — public dataset                                                                                                                       |
-| Approx. size                     | Full run: 47M fused cell profiles + 48M crops in Parquet; source images ~305k PNGs (site-level); embeddings ZIP 1.48 GB                    |
-| Pipeline / processing repo(s)    | This repository (ReRx)                                                                                                                     |
+| Field                            | Value                                                                                                                                                             |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Raw data location                | https://storage.googleapis.com/rxrx/RxRx19a/images (canonical public bucket; staged locally on Alpine per README "Full run on Alpine")                            |
+| Processed data location          | `/pl/active/koala/ReRx/runs/rxrx19a-full-20261015T223716Z-g83c9641/` (Active PetaLibrary; see README "Latest verified production results")                        |
+| Data access / restrictions       | Source dataset: public under CC BY 4.0, with attribution required. Software: BSD 3-Clause. Processed files reside on Alpine group storage.                        |
+| Data use agreement / DUA on file | Unknown — no separate DUA is documented in the checked sources; CC BY 4.0 governs source dataset reuse                                                            |
+| Approx. size                     | Full run: 47M fused cell profiles + 48M cell-crop rows in Parquet; source: 305,520 sites / 1,527,600 single-channel PNGs (five per site); embeddings ZIP: 1.48 GB |
+| Pipeline / processing repo(s)    | This repository (ReRx)                                                                                                                                            |
 
 <!-- from README.md "Latest verified production results" and src/rerx/metadata.py URLs -->
 
@@ -162,6 +162,7 @@ embeddings (5 channels × 384) from them.
 
 ## 8. Changelog
 
-| Date       | Change                                                                                                                      | By                              |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| 2026-10-29 | Initial card, filled from README.md, plan.md, src/rerx/metadata.py, src/rerx/pycytominer.py, and the RxRx19a dataset README | Dave Bunten (with Hermes Agent) |
+| Date       | Change                                                                                                                      | By          |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| 2026-10-29 | Initial card, filled from README.md, plan.md, src/rerx/metadata.py, src/rerx/pycytominer.py, and the RxRx19a dataset README | Dave Bunten |
+| 2026-11-06 | Correct scoring status, dataset license, treatment timing, cell-status uncertainty, and site versus PNG counts after review | Dave Bunten |
