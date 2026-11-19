@@ -107,13 +107,11 @@ def _buscar_skip_reason(
         return "run_buscar=False"
     if control_separation.skipped:
         return "control separation check was skipped (missing data)"
-    if not control_separation.passed:
-        return (
-            "mock/active_untreated controls do not separate "
-            f"(median |Cohen's d| = {control_separation.median_abs_effect_size:.3f} "
-            f"< {control_separation.effect_threshold}); buscar would error on an "
-            "empty on-signature, so it was skipped for this plate"
-        )
+    # NOTE: Check is now non-blocking; we keep the metric for reporting
+        # but we no longer skip buscar.
+        # The previous behavior returned a skip reason when the controls
+        # did not separate enough.  For a non-blocking gate, this logic has
+        # been removed.
     return None
 
 
